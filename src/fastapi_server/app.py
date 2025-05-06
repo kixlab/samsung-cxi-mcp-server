@@ -2,8 +2,8 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from agent import startup, shutdown, run_agent, call_tool
-from utils import jsonify_agent_response
+from fastapi_server.agent import startup, shutdown, run_agent, call_tool
+from fastapi_server.utils import jsonify_agent_response
 import base64
 from pydantic import BaseModel
 import uvicorn
@@ -172,4 +172,4 @@ async def create_text_in_root_frame():
     return result
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("fastapi_server.app:app", host="0.0.0.0", port=8000, reload=True)
