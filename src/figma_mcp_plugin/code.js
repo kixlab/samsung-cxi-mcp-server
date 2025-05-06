@@ -68,15 +68,12 @@ figma.ui.onmessage = async (msg) => {
       // Execute commands received from UI (which gets them from WebSocket)
       try {
         const result = await handleCommand(msg.command, msg.params);
-        // Get result image
-        const pageBytes = await getPageAsImage();
 
         // Send result back to UI
         figma.ui.postMessage({
           type: "command-result",
           id: msg.id,
           result,
-          pageBytes,
         });
       } catch (error) {
         figma.ui.postMessage({
@@ -2973,32 +2970,4 @@ function uint8ArrayToBase64(uint8Array) {
     binary += String.fromCharCode(uint8Array[i]);
   }
   return btoa(binary);
-}
-
-async function getPageAsImage() {
-  // const { pageId } = params || {};
-
-  // if (!pageId) {
-  //   throw new Error("Missing required parameter: pageId");
-  // }
-  console.log("[FIGMA] getPageAsImage called");
-
-  const page = figma.currentPage;
-
-  console.log("[FIGMA] page info: ", page);
-
-  await page.loadAsync();
-  if (!page) {
-    throw new Error(`Page with ID ${pageId} not found`);
-  }
-
-  console.log("[FIGMA] Page loaded successfully");
-
-  // Get the image data
-  const pageBytes = await page.exportAsync({
-    format: "PNG",
-    constraint: { type: "SCALE", value: 1 },
-  });
-
-  return pageBytes;
 }

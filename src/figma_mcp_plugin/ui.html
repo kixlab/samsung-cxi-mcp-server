@@ -655,8 +655,6 @@
             disconnectButton.click();
             break;
           case "command-result":
-          const resultImageDataUrl = uint8ToPngDataUrlSync(message.pageBytes);
-          message.result.pageImageDataUrl = resultImageDataUrl;
             sendSuccessResponse(message.id, message.result);
             break;
           case "command-error":

@@ -1,4 +1,3 @@
-from typing import Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_openai import ChatOpenAI
@@ -28,7 +27,6 @@ agent = None
 session = None
 stdio_context = None
 tool_dict = {}
-root_frame_id: Optional[str] = None
 
 async def startup():
     global agent, session, stdio_context, tool_dict
@@ -60,40 +58,7 @@ async def call_tool(tool_name: str, args: dict = {}):
             return {"status": "error", "message": f"Tool '{tool_name}' not found"}
         tool = tool_dict[tool_name]
         result = await tool.ainvoke(args)
-
-        if isinstance(result, str):
-            if tool_name == "create_frame":
-                match = re.search(r'ID:\s*([a-zA-Z0-9:]+)', result)
-                if match:
-                    created_frame_id = match.group(1)
-                    if root_frame_id is None:
-                        root_frame_id = created_frame_id
-            return {"status": "success", "data": result, "root_frame_id": root_frame_id}
-
-        return {"status": "success", "data": result, }
+        return {"status": "success", "message": result, }
     
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-# TODO: Remove this function after testing to integrate with run_agent
-async def run_agent_with_image(text: str, base64_image: str):
-    global agent
-    message = [
-        AIMessage(
-            content="You are a helpful assistant skilled at designing UI/UX."
-        ),
-        HumanMessage(
-            content=[
-                {"type": "text", "text": text},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{base64_image}",
-                        "detail": "auto"
-                    }
-                }
-            ]
-        )
-    ]
-    response = await agent.ainvoke({"messages": message})
-    return response.content
