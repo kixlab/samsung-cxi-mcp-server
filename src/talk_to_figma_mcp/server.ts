@@ -1391,10 +1391,10 @@ server.prompt(
             type: "text",
             text: `When working with Figma designs, follow these best practices:
 
-0. Key Rule:
-    - All elements should be created under a [ROOT FRAME ID].
+0. Key Rule (Important!):
+    - All elements should be created inside the root frame in [ROOT FRAME INFO].
+    - Idenitfy the root frame using ROOT FRAME ID in [ROOT FRAME INFO].
     - Any element created outside of this frame will be ignored.
-    - Use the get_document_info() to get the [ROOT FRAME ID] and use contain all elements and sub frames inside the root frame.
     - You can create multiple frames under the [ROOT FRAME ID] for different sections.
 
 1. Start with Document Structure:
