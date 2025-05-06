@@ -1,9 +1,3 @@
-# Cursor Talk to Figma MCP
-
-This project implements a Model Context Protocol (MCP) integration between Cursor AI and Figma, allowing Cursor to communicate with Figma for reading designs and modifying them programmatically.
-
-https://github.com/user-attachments/assets/129a14d2-ed73-470f-9a4c-2240b2a4885c
-
 ## Project Structure
 
 - `src/talk_to_figma_mcp/` - TypeScript MCP server를 거의 그대로 사용하고 있습니다.
@@ -45,13 +39,17 @@ talk-to-figma MCP server 코드를 수정해서 bunx 패키지 로드 아닌 다
 
 이후 MCP client 실행 시 스스로 서버 로드합니다.
 
-6. MCP Langchain client
+6. FastAPI server
 
-현재 OpenAI 4o 로 세팅해두었습니다.
 - 최상단 경로 `./` 에 `.env` 파일 및 `OPENAI_API_KEY` 변수 정의
-- `./src/langchain_server` 진입
+- `./src/fastapi_server` 진입
 - `venv` 또는 `conda` 통해서 requirement.txt 설치
 - `app.py` 실행하면 서버 로드 
+- `0.0.0.0:8080` 로 진입하면 test 목적의 웹페이지 접속 (chat interface 및 커맨드 실행)
+
+8. MCP Debugging 방법
+- `./figma_mcp_plugin` 진입하여 아래 명령어 수행
+`npx @modelcontextprotocol/inspector node src/talk_to_figma_mcp/dist/server.js`
 
 ## MCP Tools
 

@@ -1,6 +1,6 @@
 {
-  "name": "DesignForge MCP",
-  "id": "design-forge-mcp",
+  "name": "CanvasBench MCP",
+  "id": "canvas-bench-mcp",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
