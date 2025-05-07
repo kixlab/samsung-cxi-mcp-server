@@ -29,7 +29,7 @@ LOG_FILE = RESULTS_DIR / "experiment_log.txt"
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_msg = f"[{timestamp}] {message}"
-    print(full_msg)
+    # print(full_msg)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(full_msg + "\n")
 
@@ -71,7 +71,7 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
     elif variant == "text_level_1" or variant == "text_level_2":
         endpoint = "generate/text"
         data = {"message": text_input}
-        print(data)
+        # print(data)
     else:
         endpoint = "generate/text-image"
         data = aiohttp.FormData()
@@ -121,7 +121,6 @@ def fetch_node_export(json_response, step_count, root_frame_id, result_dir: Path
             with open(result_dir / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
                 json.dump({"step_count": step_count}, f, indent=2)
                 print(f"[INFO] Saved step_count to: {f.name}")
-
                 
         except Exception as e:
             log(f"[ERROR] Node export failed for {result_name}: {e}")
@@ -180,7 +179,8 @@ async def run_experiment():
 
                     except Exception as e:
                         log(f"[ERROR] Failed {result_name}: {e}")
-
+                        delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
+                        delete_response = requests.post(delete_url)
 
 if __name__ == "__main__":
     asyncio.run(run_experiment())
