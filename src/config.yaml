@@ -1,0 +1,15 @@
+benchmark_dir: ../dataset/benchmarks/generation_gt
+results_dir: ../dataset/results/generation_gen
+
+models:
+  - gpt-4o
+  # - claude-3-5-sonnet
+
+variants:
+  - image_only
+  # - text_level_1
+  # - text_level_2
+  - image_text_level_1
+  - image_text_level_2
+
+figma_file_key: v31zMGy1gZPLaLJHyiliqm

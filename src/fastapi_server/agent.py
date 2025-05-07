@@ -10,9 +10,16 @@ from pathlib import Path
 import os
 import re
 import json
+from .model_factory import get_model
+from config import load_config
+
 load_dotenv()
 
-model = ChatOpenAI(model="gpt-4o")
+CONFIG = load_config()
+models = CONFIG.get("models", [])
+if not models:
+    raise ValueError("No models defined in config.yaml")
+model = get_model(models[0])
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = str(Path(current_dir).parent)
@@ -49,7 +56,10 @@ async def run_agent(user_input: list):
     global agent
 
     human_message = HumanMessage(content=user_input)
-    return await agent.ainvoke({"messages": [human_message]})
+    return await agent.ainvoke(
+            {"messages": [human_message]},
+            config={"recursion_limit": 100}
+        )
 
 async def call_tool(tool_name: str, args: dict = {}):
     global tool_dict, root_frame_id
