@@ -190,11 +190,13 @@ async def create_root_frame_endpoint(
     root_frame_height = height
     
     if isinstance(result, dict) and "message" in result:
-        id_match = re.search(r'with ID: ([^\.]+)', result["message"])
+        id_match = re.search(r'ID: ([^\.]+)', result["message"])
         if id_match:
             root_frame_id = id_match.group(1)
             print(f"Set root_frame_id to {root_frame_id} and set width, height to {root_frame_width}, {root_frame_height}")
-    return result
+        else:
+            root_frame_id = None
+    return {"response": result, "root_frame_id": root_frame_id}
 
 @app.post("/tool/create_text_in_root_frame")
 async def create_text_in_root_frame():
