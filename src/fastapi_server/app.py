@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi_server.agent import startup, shutdown, run_agent, call_tool
 from fastapi_server.utils import jsonify_agent_response
+from fastapi_server.prompts import get_text_based_generation_prompt, get_image_based_generation_prompt, get_text_image_based_generation_prompt, get_root_prompt_suffix
 import base64
 from pydantic import BaseModel
 import uvicorn
@@ -28,6 +29,11 @@ async def lifespan_context():
 root_frame_id: Optional[str] = None
 root_frame_width: Optional[int] = None
 root_frame_height: Optional[int] = None
+
+root_prompt_suffix = get_root_prompt_suffix(
+    root_frame_id=root_frame_id,
+    root_frame_width=root_frame_width,
+    root_frame_height=root_frame_height)
 
 async def check_root_frame():
     # [1] Check if root_frame_id is set
@@ -65,50 +71,74 @@ templates = Jinja2Templates(directory=templates_dir)
 @app.get("/", response_class=HTMLResponse)
 async def get_homepage(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
-
-@app.post("/chat")
-async def chat(req: ChatRequest):
+ 
+@app.post("/generate/text")
+async def generate_with_text(req: ChatRequest):
     try:
         await check_root_frame()
         
         if req.message:
-            system_prompt_prefix = f"""
-[ROOT FRAME ID]
-Contain all creation (e.g., text, rectangle, frame.) in the root frame.
-Root Frame ID: {root_frame_id}
-Root Frame Width: {root_frame_width}
-Root Frame Height: {root_frame_height}
-            """
-            full_message = system_prompt_prefix + req.message
-            agent_input = [{"type": "text", "text": full_message}]
+            instruction = get_text_based_generation_prompt(req.message) + root_prompt_suffix
+            agent_input = [{"type": "text", "text": instruction}]
+            
             response = await run_agent(agent_input)
             json_response = jsonify_agent_response(response)
             return {"response": str(response), "json_response": json_response}
-      
+        else:
+            raise ValueError("No instruction provided.")
     except Exception as e:
         return {"response": f"Error: {str(e)}"}
-
-@app.post("/chat-img")
-async def chat_img(image: UploadFile = File(None), message: str = Form(...)):
+    
+@app.post("/generate/image")
+async def generate_with_image(image: UploadFile = File(None)):
     try:
         await check_root_frame()
+        agent_input = []
         
         base64_image = None
         if image:
             image_bytes = await image.read()
             base64_image = base64.b64encode(image_bytes).decode("utf-8")
-
+            instruction = get_image_based_generation_prompt() + root_prompt_suffix
+            agent_input.append({"type": "text", "text": instruction})
+        else:
+            raise ValueError("No image provided.")
+        if base64_image:
+            agent_input.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_image}",
+                    "detail": "auto"
+                }
+            })
+        response = await run_agent(agent_input)
+        json_response = jsonify_agent_response(response)
+        return {"response": str(response), "json_response": json_response}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    
+@app.post("/generate/text-image")
+async def generate_with_text_image(
+    image: UploadFile = File(None), 
+    message: str = Form(...),
+):
+    try:
+        await check_root_frame()
         agent_input = []
+        
+        base64_image = None
+        if image:
+            image_bytes = await image.read()
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        else:
+            raise ValueError("No image provided.")
+            
         if message:
-            system_prompt_prefix = f"""
-[ROOT FRAME ID]
-Contain all creation (e.g., text, rectangle, frame.) in the root frame.
-Root Frame ID: {root_frame_id}
-Root Frame Width: {root_frame_width}
-Root Frame Height: {root_frame_height}
-            """
-            full_message = system_prompt_prefix + message
-            agent_input.append({"type": "text", "text": full_message})
+            instruction = get_text_image_based_generation_prompt(message) + root_prompt_suffix
+            agent_input.append({"type": "text", "text": instruction})
+        else:
+            raise ValueError("No instruction provided.")
+            
         if base64_image:
             agent_input.append({
                 "type": "image_url",
@@ -121,7 +151,6 @@ Root Frame Height: {root_frame_height}
         response = await run_agent(agent_input)
         json_response = jsonify_agent_response(response)
         return {"response": str(response), "json_response": json_response}
-
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
