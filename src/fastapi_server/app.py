@@ -82,8 +82,10 @@ async def generate_with_text(req: ChatRequest):
             agent_input = [{"type": "text", "text": instruction}]
             
             response = await run_agent(agent_input)
+            messages = response.get("messages", [])
+            step_count = response.get("step_count", len(messages) - 1)
             json_response = jsonify_agent_response(response)
-            return {"response": str(response), "json_response": json_response}
+            return {"response": str(response), "json_response": json_response, "step_count": step_count}
         else:
             raise ValueError("No instruction provided.")
     except Exception as e:
@@ -112,8 +114,11 @@ async def generate_with_image(image: UploadFile = File(None)):
                 }
             })
         response = await run_agent(agent_input)
+        messages = response.get("messages", [])
+        step_count = response.get("step_count", len(messages) - 1)
+
         json_response = jsonify_agent_response(response)
-        return {"response": str(response), "json_response": json_response}
+        return {"response": str(response), "json_response": json_response, "step_count": step_count}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
     
@@ -149,9 +154,14 @@ async def generate_with_text_image(
             })
 
         response = await run_agent(agent_input)
+        messages = response.get("messages", [])
+        step_count = response.get("step_count", len(messages) - 1)
+
         json_response = jsonify_agent_response(response)
-        return {"response": str(response), "json_response": json_response}
+        return {"response": str(response), "json_response": json_response, "step_count": step_count}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/tool/get_selection")
