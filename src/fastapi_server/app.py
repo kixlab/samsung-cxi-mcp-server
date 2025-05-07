@@ -11,7 +11,7 @@ import uvicorn
 import os
 import re
 import json
-from typing import Optional
+from typing import Optional, List
 
 class ChatRequest(BaseModel):
     message: str
@@ -211,6 +211,38 @@ async def create_text_in_root_frame():
         "text": "Hello in root!"
     })
     return result
+
+@app.post("/tool/delete_node")
+async def delete_node(node_id: str = Query(..., description="ID of the node to delete")):
+    result = await call_tool("delete_node", {"nodeId": node_id})
+    return result
+
+@app.post("/tool/delete_multiple_nodes")
+async def delete_multiple_nodes(node_ids: List[str] = Query(..., description="List of node IDs to delete")):
+    result = await call_tool("delete_multiple_nodes", {"nodeIds": node_ids})
+    return result
+
+@app.post("/tool/delete_all_top_level_nodes")
+async def delete_all_top_level_nodes():
+    try:
+        response = await call_tool("get_document_info")
+        document_info = json.loads(response["message"])
+
+        if "children" not in document_info:
+            return {"status": "error", "message": "No children in document."}
+
+        top_node_ids = [node["id"] for node in document_info["children"]]
+
+        if not top_node_ids:
+            return {"status": "success", "message": "No nodes to delete."}
+
+        result = await call_tool("delete_multiple_nodes", {"nodeIds": top_node_ids})
+        return {"status": "success", "deleted_node_ids": top_node_ids, "result": result}
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     uvicorn.run("fastapi_server.app:app", host="0.0.0.0", port=8000, reload=True)
