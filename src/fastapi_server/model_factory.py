@@ -25,7 +25,7 @@ def get_model(model_name: str = None):
 
         return ChatOpenAI(
             model=model_name,
-            temperature=0.0,
+            temperature=0.7,
             max_tokens=1024,
         )
 
