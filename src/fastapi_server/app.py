@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi_server.agent import startup, shutdown, run_agent, call_tool
 from fastapi_server.utils import jsonify_agent_response
-from fastapi_server.prompts import get_text_based_generation_prompt, get_image_based_generation_prompt, get_text_image_based_generation_prompt, get_root_prompt_suffix
+from fastapi_server.prompts import get_text_based_generation_prompt, get_image_based_generation_prompt, get_text_image_based_generation_prompt
 import base64
 from pydantic import BaseModel
 import uvicorn
@@ -26,31 +26,7 @@ async def lifespan_context():
     
 # ========== Server State ==========
 
-root_frame_id: Optional[str] = None
-root_frame_width: Optional[int] = None
-root_frame_height: Optional[int] = None
 current_channel: Optional[str] = None
-
-root_prompt_suffix = get_root_prompt_suffix(
-    root_frame_id=root_frame_id,
-    root_frame_width=root_frame_width,
-    root_frame_height=root_frame_height)
-
-async def check_root_frame():
-    # [1] Check if root_frame_id is set
-    if root_frame_id is None:
-        raise ValueError("Root frame ID is not set. Please create a root frame first.")
-    
-    # [2] Check if root_frame_id exists in the document structure
-    response = await call_tool("get_document_info")
-    document_info = json.loads(response["message"])
-    
-    root_frame_in_canvas = next(
-        (child for child in document_info["children"] if child["id"] == root_frame_id), 
-        None
-    )
-    if root_frame_in_canvas is None:
-        raise ValueError("Root frame ID is not found in the document structure.")
 
 # ========== FastAPI Setup & Static Hosting =========
     
@@ -75,11 +51,9 @@ async def get_homepage(request: Request):
  
 @app.post("/generate/text")
 async def generate_with_text(req: ChatRequest):
-    try:
-        await check_root_frame()
-        
+    try:        
         if req.message:
-            instruction = get_text_based_generation_prompt(req.message) + root_prompt_suffix
+            instruction = get_text_based_generation_prompt(req.message)
             agent_input = [{"type": "text", "text": instruction}]
             
             response = await run_agent(agent_input)
@@ -95,14 +69,13 @@ async def generate_with_text(req: ChatRequest):
 @app.post("/generate/image")
 async def generate_with_image(image: UploadFile = File(None)):
     try:
-        await check_root_frame()
         agent_input = []
         
         base64_image = None
         if image:
             image_bytes = await image.read()
             base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            instruction = get_image_based_generation_prompt() + root_prompt_suffix
+            instruction = get_image_based_generation_prompt()
             agent_input.append({"type": "text", "text": instruction})
         else:
             raise ValueError("No image provided.")
@@ -129,7 +102,6 @@ async def generate_with_text_image(
     message: str = Form(...),
 ):
     try:
-        await check_root_frame()
         agent_input = []
         
         base64_image = None
@@ -140,7 +112,7 @@ async def generate_with_text_image(
             raise ValueError("No image provided.")
             
         if message:
-            instruction = get_text_image_based_generation_prompt(message) + root_prompt_suffix
+            instruction = get_text_image_based_generation_prompt(message)
             agent_input.append({"type": "text", "text": instruction})
         else:
             raise ValueError("No instruction provided.")

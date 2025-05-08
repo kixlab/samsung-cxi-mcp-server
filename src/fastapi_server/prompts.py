@@ -53,16 +53,3 @@ Carefully examine the provided screen image and text, and precisely replicate th
 Please analyze the following text and screen image  and generate a UI inside the [ROOT FRAME] in the Figma canvas.
 {instruction}  
 """
-
-def get_root_prompt_suffix(root_frame_id: str, root_frame_width: int, root_frame_height: int) -> str:
-    return f"""
-
-[ROOT FRAME INFO]
-Every creation (e.g., text, rectangle, frame) should be contained in the ROOT FRAME in Figma.
-Find the ROOT FRAME in the Figma canvas using the ID.
-Match the creation size to the ROOT FRAME size.
-
-ROOT FRAME ID: {root_frame_id}
-ROOT FRAME Width: {root_frame_width}
-ROOT FRAME Height: {root_frame_height}
-"""
