@@ -180,12 +180,15 @@ def render_combined_image(node_infos: list, img_urls: dict, out_path="combined_o
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
     canvas.save(out_path)
-    
-def fetch_node_export(json_response, step_count, result_dir: Path, result_name: str):
-    with open(result_dir / f"{result_name}_json_response.json", "w", encoding="utf-8") as f:
+
+def fetch_node_export(json_response, step_count, model_dir: Path, result_name: str):
+    output_dir = model_dir / result_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(output_dir / f"{result_name}_json_response.json", "w", encoding="utf-8") as f:
         json.dump(json_response, f, indent=2, ensure_ascii=False)
 
-    with open(result_dir / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
+    with open(output_dir / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
         json.dump({"step_count": step_count}, f, indent=2)
 
 async def run_experiment():
