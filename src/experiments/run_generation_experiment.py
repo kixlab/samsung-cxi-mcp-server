@@ -157,29 +157,32 @@ def render_combined_image(node_infos: list, img_urls: dict, out_path="combined_o
     if not node_infos:
         raise ValueError("No nodes provided for rendering.")
 
-    min_x = min(int(n["bbox"]["x"] * scale) for n in node_infos)
-    min_y = min(int(n["bbox"]["y"] * scale) for n in node_infos)
-    max_x = max(int((n["bbox"]["x"] + n["bbox"]["width"]) * scale) for n in node_infos)
-    max_y = max(int((n["bbox"]["y"] + n["bbox"]["height"]) * scale) for n in node_infos)
+    try:
+        min_x = min(int(n["bbox"]["x"] * scale) for n in node_infos)
+        min_y = min(int(n["bbox"]["y"] * scale) for n in node_infos)
+        max_x = max(int((n["bbox"]["x"] + n["bbox"]["width"]) * scale) for n in node_infos)
+        max_y = max(int((n["bbox"]["y"] + n["bbox"]["height"]) * scale) for n in node_infos)
 
-    canvas_width = max_x - min_x
-    canvas_height = max_y - min_y
-    canvas = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 0))
+        canvas_width = max_x - min_x
+        canvas_height = max_y - min_y
+        canvas = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 0))
 
-    for node in node_infos:
-        node_id = node["id"]
-        if node_id not in img_urls:
-            continue
-        img_data = requests.get(img_urls[node_id])
-        if img_data.status_code == 200:
-            img = Image.open(io.BytesIO(img_data.content)).convert("RGBA")
-            x = int((node["bbox"]["x"] * scale) - min_x)
-            y = int((node["bbox"]["y"] * scale) - min_y)
-            canvas.paste(img, (x, y), img)
+        for node in node_infos:
+            node_id = node["id"]
+            if node_id not in img_urls:
+                continue
+            img_data = requests.get(img_urls[node_id])
+            if img_data.status_code == 200:
+                img = Image.open(io.BytesIO(img_data.content)).convert("RGBA")
+                x = int((node["bbox"]["x"] * scale) - min_x)
+                y = int((node["bbox"]["y"] * scale) - min_y)
+                canvas.paste(img, (x, y), img)
+    except Exception as e:
+        print(f"[WARNING] Failed to process image for node {node_id}: {e}")
 
-    dir_name = os.path.dirname(out_path)
-    if dir_name:
-        os.makedirs(dir_name, exist_ok=True)
+    dir_path = os.path.dirname(out_path)
+    if dir_path and not os.path.exists(dir_path):
+        os.makedirs(dir_path, exist_ok=True)
     canvas.save(out_path)
 
 def fetch_node_export(json_response, step_count, model_dir: Path, result_name: str):
@@ -216,8 +219,10 @@ async def run_experiment():
 
                 for variant in VARIANTS:
                     result_name = f"{base_id}-{model_name}-{variant}"
-                    json_path = model_dir / result_name / f"{result_name}.json"
+                    json_path = model_dir / f"{result_name}.json"
                     png_path = model_dir / result_name / f"{result_name}.png"
+                    print(json_path)
+                    print(png_path)
                     if json_path.exists() and png_path.exists():
                         log(f"[SKIP] {result_name}")
                         print(f"[SKIP] {result_name}")
@@ -260,8 +265,13 @@ async def run_experiment():
                         img_urls = img_res.json()["images"]
 
                         combined_path = f"{model_dir}/{result_name}/{result_name}.png"
-                        render_combined_image(node_infos, img_urls, out_path=combined_path, scale=scale)
-                        print("✅ Combined image saved to:", combined_path)
+                        try:
+                            render_combined_image(node_infos, img_urls, out_path=combined_path, scale=scale)
+                            print("✅ Combined image saved to:", combined_path)
+                        except Exception as render_err:
+                            log(f"[ERROR] canvas rendering failed for {result_name}: {render_err}")
+                            failures[result_name] = failures.get(result_name, 0) + 1
+                            continue
 
                         with open(model_dir / result_name / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
                             json.dump({"step_count": response["step_count"]}, f, indent=2)
