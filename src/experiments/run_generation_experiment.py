@@ -198,13 +198,14 @@ def render_combined_image(node_infos: list, img_urls: dict, out_path="combined_o
                 x = int((node["bbox"]["x"] * scale) - min_x)
                 y = int((node["bbox"]["y"] * scale) - min_y)
                 canvas.paste(img, (x, y), img)
+        dir_path = os.path.dirname(out_path)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+        canvas.save(out_path)
     except Exception as e:
         print(f"[WARNING] Failed to process image for node {node_id}: {e}")
 
-    dir_path = os.path.dirname(out_path)
-    if dir_path and not os.path.exists(dir_path):
-        os.makedirs(dir_path, exist_ok=True)
-    canvas.save(out_path)
+
 
 def fetch_node_export(json_response, step_count, model_dir: Path, result_name: str):
     output_dir = model_dir / result_name
