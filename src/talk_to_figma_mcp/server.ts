@@ -65,14 +65,11 @@ const serverUrl = serverArg ? serverArg.split("=")[1] : "localhost";
 const WS_URL =
   serverUrl === "localhost" ? `ws://${serverUrl}` : `wss://${serverUrl}`;
 
-// Join Channel Tool
 server.tool(
-  "select_channel",
-  "Select a specific Figma channel for communication",
-  {
-    channel: z.string().describe("The channel name to join").optional(),
-  },
-  async ({ channel }) => {
+  "get_channels",
+  "Get available Figma channels for communication",
+  {},
+  async () => {
     try {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connectToFigma();
@@ -86,7 +83,7 @@ server.tool(
         };
       }
 
-      // First, get available channels
+      // Get available channels
       const id = uuidv4();
       return new Promise((resolve) => {
         ws!.send(
@@ -105,98 +102,17 @@ server.tool(
               const availableChannels = json.channels;
               ws!.removeListener("message", messageHandler);
 
-              // If no channel specified, just return the list
-              if (!channel) {
-                resolve({
-                  content: [
-                    {
-                      type: "text",
-                      text: `Available channels: ${availableChannels.join(
-                        ", "
-                      )}\nCurrently in channel: ${currentChannel || "None"}`,
-                    },
-                  ],
-                });
-                return;
-              }
-
-              // Check if requested channel exists
-              if (!availableChannels.includes(channel)) {
-                resolve({
-                  content: [
-                    {
-                      type: "text",
-                      text: `Error: Channel "${channel}" does not exist.\nAvailable channels: ${availableChannels.join(
-                        ", "
-                      )}`,
-                    },
-                  ],
-                });
-                return;
-              }
-
-              // Join the requested channel
-              ws!.send(
-                JSON.stringify({
-                  type: "join",
-                  channel: channel,
-                  clientType: "mcp_client",
-                })
-              );
-
-              // Set up another one-time listener for join response
-              const joinHandler = (joinData: any) => {
-                try {
-                  const joinJson = JSON.parse(joinData.toString());
-
-                  if (
-                    joinJson.type === "join_result" &&
-                    joinJson.channel === channel
-                  ) {
-                    ws!.removeListener("message", joinHandler);
-
-                    if (joinJson.success) {
-                      currentChannel = channel;
-                      resolve({
-                        content: [
-                          {
-                            type: "text",
-                            text: `Successfully joined channel: ${channel}`,
-                          },
-                        ],
-                      });
-                    } else {
-                      resolve({
-                        content: [
-                          {
-                            type: "text",
-                            text: `Failed to join channel: ${
-                              joinJson.error || "Unknown error"
-                            }`,
-                          },
-                        ],
-                      });
-                    }
-                  }
-                } catch (error) {
-                  // Keep listening, this message wasn't the join response
-                }
-              };
-
-              ws!.on("message", joinHandler);
-
-              // Set a timeout for the join response
-              setTimeout(() => {
-                ws!.removeListener("message", joinHandler);
-                resolve({
-                  content: [
-                    {
-                      type: "text",
-                      text: "Timed out waiting for channel join response",
-                    },
-                  ],
-                });
-              }, 5000);
+              resolve({
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      availableChannels,
+                      currentChannel,
+                    }),
+                  },
+                ],
+              });
             }
           } catch (error) {
             // Keep listening, this message wasn't the channels response
@@ -213,6 +129,106 @@ server.tool(
               {
                 type: "text",
                 text: "Timed out waiting for available channels",
+              },
+            ],
+          });
+        }, 5000);
+      });
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting channels: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Join Channel Tool
+server.tool(
+  "select_channel",
+  "Select a specific Figma channel for communication",
+  {
+    channel: z.string().describe("The channel name to join"),
+  },
+  async ({ channel }) => {
+    try {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connectToFigma();
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Not connected to Figma. Attempting to connect...",
+            },
+          ],
+        };
+      }
+
+      // Join the requested channel
+      return new Promise((resolve) => {
+        ws!.send(
+          JSON.stringify({
+            type: "join",
+            channel: channel,
+            clientType: "mcp_client",
+          })
+        );
+
+        // Set up a one-time listener for join response
+        const joinHandler = (joinData: any) => {
+          try {
+            const joinJson = JSON.parse(joinData.toString());
+
+            if (
+              joinJson.type === "join_result" &&
+              joinJson.channel === channel
+            ) {
+              ws!.removeListener("message", joinHandler);
+
+              if (joinJson.success) {
+                currentChannel = channel;
+                resolve({
+                  content: [
+                    {
+                      type: "text",
+                      text: `Successfully joined channel: ${channel}`,
+                    },
+                  ],
+                });
+              } else {
+                resolve({
+                  content: [
+                    {
+                      type: "text",
+                      text: `Failed to join channel: ${
+                        joinJson.error || "Unknown error"
+                      }`,
+                    },
+                  ],
+                });
+              }
+            }
+          } catch (error) {
+            // Keep listening, this message wasn't the join response
+          }
+        };
+
+        ws!.on("message", joinHandler);
+
+        // Set a timeout for the join response
+        setTimeout(() => {
+          ws!.removeListener("message", joinHandler);
+          resolve({
+            content: [
+              {
+                type: "text",
+                text: "Timed out waiting for channel join response",
               },
             ],
           });

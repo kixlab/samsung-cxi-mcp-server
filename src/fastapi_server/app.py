@@ -244,53 +244,67 @@ async def delete_all_top_level_nodes():
         import traceback
         traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
+    
+@app.post("/tool/get_channels")
+async def get_channels_endpoint():
+    try:
+        result = await call_tool("get_channels")
+        
+        # Process the result to make it more user-friendly
+        if isinstance(result, dict) and "message" in result and result["message"]:
+            try:
+                # Parse the JSON string in the result message
+                channel_data = json.loads(result["message"])
+                
+                # Extract available channels and current channel
+                return {
+                    "status": "success",
+                    "available_channels": channel_data.get("availableChannels", []),
+                    "current_channel": channel_data.get("currentChannel")
+                }
+            except json.JSONDecodeError:
+                return {
+                    "status": "error",
+                    "message": "Failed to parse channel information"
+                }
+        
+        return {"status": "error", "message": "Invalid response from tool"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+    
 @app.post("/tool/select_channel")
 async def select_channel_endpoint(
-    channel: Optional[str] = Query(None, description="The channel name to join. If not provided, will list available channels.")
+    channel: str = Query(..., description="The channel name to join")
 ):
     global current_channel
     try:
-        # If channel is None, this will list available channels
-        result = await call_tool("select_channel", {"channel": channel} if channel else {})
+        result = await call_tool("select_channel", {"channel": channel})
         
         # Process the result to make it more user-friendly
         if isinstance(result, dict) and "message" in result and result["message"]:
             message = result["message"]
             
             # If response indicates successful channel join
-            if channel and "Successfully joined channel:" in message:
+            if "Successfully joined channel:" in message:
                 # Update server state to track current channel
                 current_channel = channel
                 return {
                     "status": "success",
                     "channel": current_channel
                 }
-            
-            # For channel listing, return a clean list
-            elif "Available channels:" in message:
-                
-                lines = message.strip().split('\n')
-                channels_text = lines[0].replace("Available channels:", "").strip()
-                
-                available_channels = [c.strip() for c in channels_text.split(',')]
-                
-
-                return {
-                    "status": "success",
-                    "available_channels": available_channels,
-                    "current_channel": current_channel
-                }
-            
             # For errors or other responses
             else:
                 return {
-                    "status": "error" if "Error" in message else "success",
+                    "status": "error" if "Error" in message or "Failed" in message else "success",
                     "message": message
                 }
         
         return {"status": "error", "message": "Invalid response from tool"}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":

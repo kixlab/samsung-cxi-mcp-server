@@ -92,6 +92,26 @@
             padding: 16px;
             background-color: var(--color-canvas-default);
         }
+
+        .select-with-refresh {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .select-with-refresh select {
+            flex: 1;
+        }
+        
+        .button.small {
+            padding: 4px;
+            min-width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
         
         /* Task type selector */
         .task-type-selector {
@@ -516,14 +536,17 @@
             <div class="debug-tool-panel">
                 <h3>Channel Selector</h3>
                 <div class="channel-selector">
-                    <div class="form-group">
+                    <div class="form-group channel-select-container">
                         <label for="channel-select">Current Channel: <span id="current-channel-display">None</span></label>
-                        <select id="channel-select" class="task-input">
-                            <option value="">Loading channels...</option>
-                        </select>
+                        <div class="select-with-refresh">
+                            <select id="channel-select" class="task-input">
+                                <option value="">Loading channels...</option>
+                            </select>
+                            <button id="refresh-channels" class="button small" title="Refresh Channels">
+                                ↻
+                            </button>
+                        </div>
                     </div>
-                    <button id="refresh-channels" class="button">Refresh Channels</button>
-                    <button id="join-channel" class="button primary">Join Channel</button>
                 </div>
             </div>
             
@@ -869,7 +892,7 @@
                 const button = document.getElementById('refresh-channels');
                 showLoading(button);
                 
-                const response = await fetch('/tool/select_channel', { method: 'POST' });
+                const response = await fetch('/tool/get_channels', { method: 'POST' });
                 
                 if (!response.ok) {
                     throw new Error(`Server error: ${response.status} ${response.statusText}`);
@@ -911,27 +934,23 @@
                     document.getElementById('tool-results').textContent = `Error fetching channels: ${data.message || 'Unknown error'}`;
                 }
                 
-                resetButton(button, 'Refresh Channels');
+                resetButton(button, '↻');
             } catch (error) {
                 document.getElementById('tool-results').textContent = `Error: ${error.message}`;
-                resetButton(document.getElementById('refresh-channels'), 'Refresh Channels');
+                resetButton(document.getElementById('refresh-channels'), '↻');
             }
         }
         
-        async function joinChannel() {
-            const channelSelect = document.getElementById('channel-select');
-            const selectedChannel = channelSelect.value;
-            
-            if (!selectedChannel) {
-                document.getElementById('tool-results').textContent = 'Please select a channel first.';
+        async function joinSelectedChannel(channelName) {
+            if (!channelName) {
                 return;
             }
             
             try {
-                const button = document.getElementById('join-channel');
-                showLoading(button);
+                // Show loading state in the display text
+                document.getElementById('current-channel-display').textContent = `Joining ${channelName}...`;
                 
-                const response = await fetch(`/tool/select_channel?channel=${encodeURIComponent(selectedChannel)}`, {
+                const response = await fetch(`/tool/select_channel?channel=${encodeURIComponent(channelName)}`, {
                     method: 'POST',
                 });
                 
@@ -943,23 +962,29 @@
                 log("Join channel response:", data);
                 
                 if (data.status === 'success') {
-                    document.getElementById('current-channel-display').textContent = data.channel || selectedChannel;
-                    document.getElementById('tool-results').textContent = `Successfully joined channel: ${data.channel || selectedChannel}`;
+                    document.getElementById('current-channel-display').textContent = data.channel || channelName;
+                    document.getElementById('tool-results').textContent = `Successfully joined channel: ${data.channel || channelName}`;
                 } else {
+                    document.getElementById('current-channel-display').textContent = 'Connection failed';
                     document.getElementById('tool-results').textContent = `Error joining channel: ${data.message || 'Unknown error'}`;
                 }
-                
-                resetButton(button, 'Join Channel');
             } catch (error) {
+                document.getElementById('current-channel-display').textContent = 'Connection error';
                 document.getElementById('tool-results').textContent = `Error: ${error.message}`;
-                resetButton(document.getElementById('join-channel'), 'Join Channel');
             }
         }
         
         // Event listeners for channel selector
+        // Refresh channels button
         document.getElementById('refresh-channels').addEventListener('click', fetchChannels);
-        document.getElementById('join-channel').addEventListener('click', joinChannel);
         
+        // Channel select change event - automatically join the selected channel
+        document.getElementById('channel-select').addEventListener('change', function() {
+            const selectedChannel = this.value;
+            if (selectedChannel) {
+                joinSelectedChannel(selectedChannel);
+            }
+        });
         // Initialize - fetch channels when page loads
         document.addEventListener('DOMContentLoaded', fetchChannels);
         
