@@ -144,7 +144,8 @@ def export_images(file_key: str, node_infos: list, format: str = "png", out_dir:
         img_url = images[node_id]
         img_data = requests.get(img_url)
         if img_data.status_code == 200:
-            file_path = Path(out_dir) / f"{name}.{format}"
+            file_path = Path(out_dir) / "assets" / f"{name}.{format}"
+            file_path.parent.mkdir(parents=True, exist_ok=True)
             print(file_path)
             with open(file_path, "wb") as f:
                 f.write(img_data.content)
@@ -282,8 +283,24 @@ async def run_experiment():
                         print(f"[ERROR] Failed {result_name}: {e}")
                         failures[result_name] = failures.get(result_name, 0) + 1
                         failures_path.write_text(json.dumps(failures, indent=2, ensure_ascii=False), encoding='utf-8')
+
+                        if 'response' in locals() and isinstance(response, dict):
+                            try:
+                                fetch_node_export(
+                                    response.get("json_response", {}),
+                                    response.get("step_count", -1),
+                                    model_dir,
+                                    result_name
+                                )
+                            except Exception as e_inner:
+                                log(f"[ERROR][SAVE-FAIL] Couldn't save partial response for {result_name}: {e_inner}")
+
                         delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
-                        requests.post(delete_url)
+                        delete_response = requests.post(delete_url)
+                        if delete_response.status_code == 200:
+                            log(f"[CLEANUP] Deleted all top-level nodes after failed {result_name}")
+                        else:
+                            log(f"[CLEANUP-FAIL] Failed to delete nodes after failed {result_name}: {delete_response.status_code}")
 
 if __name__ == "__main__":
     asyncio.run(run_experiment())
