@@ -329,6 +329,56 @@
             border-radius: 6px;
             margin-bottom: 16px;
         }
+
+        .debug-tool-panel {
+            padding: 16px;
+            background-color: var(--color-canvas-subtle);
+            border: 1px solid var(--color-border-default);
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        
+        .debug-tool-panel h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .debug-tool-panel h4 {
+            margin-top: 12px;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        /* Channel selector styles */
+        .channel-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .channel-selector .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .channel-selector select {
+            width: 100%;
+            padding: 8px;
+        }
+        
+        .channel-selector .button-group {
+            display: flex;
+            gap: 8px;
+        }
+        
+        #current-channel-display {
+            font-weight: 600;
+            color: var(--color-accent-fg);
+        }
         
         .tool-buttons {
             display: flex;
@@ -460,8 +510,26 @@
         </div>
         
         <div class="sidebar-panel">
-            <div class="debug-tools">
-                <h2>Debug Tools</h2>
+            <h2>Debug Tools</h2>
+        
+            <!-- Channel Selector Panel -->
+            <div class="debug-tool-panel">
+                <h3>Channel Selector</h3>
+                <div class="channel-selector">
+                    <div class="form-group">
+                        <label for="channel-select">Current Channel: <span id="current-channel-display">None</span></label>
+                        <select id="channel-select" class="task-input">
+                            <option value="">Loading channels...</option>
+                        </select>
+                    </div>
+                    <button id="refresh-channels" class="button">Refresh Channels</button>
+                    <button id="join-channel" class="button primary">Join Channel</button>
+                </div>
+            </div>
+            
+            <!-- Node Manipulation Panel -->
+            <div class="debug-tool-panel">
+                <h3>Node Tools</h3>
                 <div class="tool-buttons">
                     <button id="get-selection" class="button">Get Selection</button>
                     <button id="create-frame" class="button">Create Root Frame</button>
@@ -469,7 +537,7 @@
                 </div>
                 
                 <div id="frame-params" style="display: none;">
-                    <h3>Create Frame Parameters</h3>
+                    <h4>Create Frame Parameters</h4>
                     <form id="frame-params-form" class="frame-params-form">
                         <div class="form-group">
                             <label for="frame-x">X:</label>
@@ -494,7 +562,11 @@
                         <button type="submit" class="button primary">Create</button>
                     </form>
                 </div>
-                
+            </div>
+            
+            <!-- Results Panel -->
+            <div class="debug-tool-panel">
+                <h3>Tool Results</h3>
                 <div id="tool-results" class="tool-result"></div>
             </div>
         </div>
@@ -791,6 +863,105 @@
                 });
             }
         }
+        
+        async function fetchChannels() {
+            try {
+                const button = document.getElementById('refresh-channels');
+                showLoading(button);
+                
+                const response = await fetch('/tool/select_channel', { method: 'POST' });
+                
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                log("Channel list:", data);
+                
+                // Update channel dropdown
+                const channelSelect = document.getElementById('channel-select');
+                channelSelect.innerHTML = ''; // Clear options
+                
+                // Add a placeholder option
+                const placeholderOption = document.createElement('option');
+                placeholderOption.value = '';
+                placeholderOption.textContent = '-- Select a channel --';
+                channelSelect.appendChild(placeholderOption);
+                
+                // Add channel options
+                if (data.status === 'success' && data.available_channels) {
+                    data.available_channels.forEach(channel => {
+                        const option = document.createElement('option');
+                        option.value = channel;
+                        option.textContent = channel;
+                        channelSelect.appendChild(option);
+                    });
+                    
+                    // Update current channel display
+                    if (data.current_channel && data.current_channel !== 'None') {
+                        document.getElementById('current-channel-display').textContent = data.current_channel;
+                        // Select the current channel in dropdown
+                        Array.from(channelSelect.options).forEach(option => {
+                            if (option.value === data.current_channel) {
+                                option.selected = true;
+                            }
+                        });
+                    }
+                } else {
+                    document.getElementById('tool-results').textContent = `Error fetching channels: ${data.message || 'Unknown error'}`;
+                }
+                
+                resetButton(button, 'Refresh Channels');
+            } catch (error) {
+                document.getElementById('tool-results').textContent = `Error: ${error.message}`;
+                resetButton(document.getElementById('refresh-channels'), 'Refresh Channels');
+            }
+        }
+        
+        async function joinChannel() {
+            const channelSelect = document.getElementById('channel-select');
+            const selectedChannel = channelSelect.value;
+            
+            if (!selectedChannel) {
+                document.getElementById('tool-results').textContent = 'Please select a channel first.';
+                return;
+            }
+            
+            try {
+                const button = document.getElementById('join-channel');
+                showLoading(button);
+                
+                const response = await fetch(`/tool/select_channel?channel=${encodeURIComponent(selectedChannel)}`, {
+                    method: 'POST',
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                log("Join channel response:", data);
+                
+                if (data.status === 'success') {
+                    document.getElementById('current-channel-display').textContent = data.channel || selectedChannel;
+                    document.getElementById('tool-results').textContent = `Successfully joined channel: ${data.channel || selectedChannel}`;
+                } else {
+                    document.getElementById('tool-results').textContent = `Error joining channel: ${data.message || 'Unknown error'}`;
+                }
+                
+                resetButton(button, 'Join Channel');
+            } catch (error) {
+                document.getElementById('tool-results').textContent = `Error: ${error.message}`;
+                resetButton(document.getElementById('join-channel'), 'Join Channel');
+            }
+        }
+        
+        // Event listeners for channel selector
+        document.getElementById('refresh-channels').addEventListener('click', fetchChannels);
+        document.getElementById('join-channel').addEventListener('click', joinChannel);
+        
+        // Initialize - fetch channels when page loads
+        document.addEventListener('DOMContentLoaded', fetchChannels);
         
         // Task type selector
         document.querySelectorAll('.task-type-option').forEach(option => {

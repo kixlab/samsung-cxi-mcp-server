@@ -41,13 +41,14 @@ const logger = {
 
 // WebSocket connection and request tracking
 let ws: WebSocket | null = null;
+let currentChannel: string | null = null;
 const pendingRequests = new Map<
   string,
   {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
     timeout: ReturnType<typeof setTimeout>;
-    lastActivity: number; // Add timestamp for last activity
+    lastActivity: number;
   }
 >();
 
@@ -63,6 +64,174 @@ const serverArg = args.find((arg) => arg.startsWith("--server="));
 const serverUrl = serverArg ? serverArg.split("=")[1] : "localhost";
 const WS_URL =
   serverUrl === "localhost" ? `ws://${serverUrl}` : `wss://${serverUrl}`;
+
+// Join Channel Tool
+server.tool(
+  "select_channel",
+  "Select a specific Figma channel for communication",
+  {
+    channel: z.string().describe("The channel name to join").optional(),
+  },
+  async ({ channel }) => {
+    try {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connectToFigma();
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Not connected to Figma. Attempting to connect...",
+            },
+          ],
+        };
+      }
+
+      // First, get available channels
+      const id = uuidv4();
+      return new Promise((resolve) => {
+        ws!.send(
+          JSON.stringify({
+            id,
+            type: "get_channels",
+          })
+        );
+
+        // Set up a one-time listener for the response
+        const messageHandler = (data: any) => {
+          try {
+            const json = JSON.parse(data.toString());
+
+            if (json.type === "channels" && json.channels) {
+              const availableChannels = json.channels;
+              ws!.removeListener("message", messageHandler);
+
+              // If no channel specified, just return the list
+              if (!channel) {
+                resolve({
+                  content: [
+                    {
+                      type: "text",
+                      text: `Available channels: ${availableChannels.join(
+                        ", "
+                      )}\nCurrently in channel: ${currentChannel || "None"}`,
+                    },
+                  ],
+                });
+                return;
+              }
+
+              // Check if requested channel exists
+              if (!availableChannels.includes(channel)) {
+                resolve({
+                  content: [
+                    {
+                      type: "text",
+                      text: `Error: Channel "${channel}" does not exist.\nAvailable channels: ${availableChannels.join(
+                        ", "
+                      )}`,
+                    },
+                  ],
+                });
+                return;
+              }
+
+              // Join the requested channel
+              ws!.send(
+                JSON.stringify({
+                  type: "join",
+                  channel: channel,
+                  clientType: "mcp_client",
+                })
+              );
+
+              // Set up another one-time listener for join response
+              const joinHandler = (joinData: any) => {
+                try {
+                  const joinJson = JSON.parse(joinData.toString());
+
+                  if (
+                    joinJson.type === "join_result" &&
+                    joinJson.channel === channel
+                  ) {
+                    ws!.removeListener("message", joinHandler);
+
+                    if (joinJson.success) {
+                      currentChannel = channel;
+                      resolve({
+                        content: [
+                          {
+                            type: "text",
+                            text: `Successfully joined channel: ${channel}`,
+                          },
+                        ],
+                      });
+                    } else {
+                      resolve({
+                        content: [
+                          {
+                            type: "text",
+                            text: `Failed to join channel: ${
+                              joinJson.error || "Unknown error"
+                            }`,
+                          },
+                        ],
+                      });
+                    }
+                  }
+                } catch (error) {
+                  // Keep listening, this message wasn't the join response
+                }
+              };
+
+              ws!.on("message", joinHandler);
+
+              // Set a timeout for the join response
+              setTimeout(() => {
+                ws!.removeListener("message", joinHandler);
+                resolve({
+                  content: [
+                    {
+                      type: "text",
+                      text: "Timed out waiting for channel join response",
+                    },
+                  ],
+                });
+              }, 5000);
+            }
+          } catch (error) {
+            // Keep listening, this message wasn't the channels response
+          }
+        };
+
+        ws!.on("message", messageHandler);
+
+        // Set a timeout for the channels response
+        setTimeout(() => {
+          ws!.removeListener("message", messageHandler);
+          resolve({
+            content: [
+              {
+                type: "text",
+                text: "Timed out waiting for available channels",
+              },
+            ],
+          });
+        }, 5000);
+      });
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error selecting channel: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
 
 // Document Info Tool
 server.tool(
@@ -2378,7 +2547,6 @@ type FigmaCommand =
   | "set_item_spacing"
   | "check_connection_status";
 
-// Update the connectToFigma function to remove channel-related code
 function connectToFigma(port: number = 3055) {
   // If already connected, do nothing
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2394,14 +2562,12 @@ function connectToFigma(port: number = 3055) {
     logger.info("Connected to Figma socket server");
 
     // Send initial message to identify the client
+    // We don't send a channel join yet since we need to fetch available channels first
     const id = uuidv4();
     ws!.send(
       JSON.stringify({
         id,
-        type: "join",
-        message: {
-          id,
-        },
+        type: "get_channels",
       })
     );
   });
@@ -2410,17 +2576,54 @@ function connectToFigma(port: number = 3055) {
     try {
       // Define a more specific type with an index signature to allow any property access
       interface ProgressMessage {
-        message: FigmaResponse | any;
+        message?: FigmaResponse | any;
         type?: string;
         id?: string;
+        channels?: string[];
+        success?: boolean;
+        channel?: string;
+        error?: string;
         [key: string]: any; // Allow any other properties
       }
 
       const json = JSON.parse(data) as ProgressMessage;
 
+      // Handle channels response
+      if (json.type === "channels" && json.channels) {
+        logger.info(`Available channels: ${json.channels.join(", ")}`);
+
+        // Auto-join the first channel if we're not already in a channel
+        if (!currentChannel && json.channels.length > 0) {
+          const channelToJoin = json.channels[0];
+          logger.info(`Auto-joining channel: ${channelToJoin}`);
+
+          ws!.send(
+            JSON.stringify({
+              type: "join",
+              channel: channelToJoin,
+              clientType: "mcp_client", // Set client type to mcp_client
+            })
+          );
+        }
+        return;
+      }
+
+      // Handle join channel result
+      if (json.type === "join_result") {
+        if (json.success) {
+          currentChannel = json.channel || null;
+          logger.info(`Successfully joined channel: ${currentChannel}`);
+        } else {
+          logger.error(
+            `Failed to join channel: ${json.error || "Unknown error"}`
+          );
+        }
+        return;
+      }
+
       // Handle progress updates
       if (json.type === "progress_update") {
-        const progressData = json.message.data as CommandProgressUpdate;
+        const progressData = json.message?.data as CommandProgressUpdate;
         const requestId = json.id || "";
 
         if (requestId && pendingRequests.has(requestId)) {
@@ -2463,7 +2666,7 @@ function connectToFigma(port: number = 3055) {
       }
 
       // Handle regular responses
-      const myResponse = json.message;
+      const myResponse = json.message || json;
       // logger.debug(`Received message: ${JSON.stringify(myResponse)}`);
 
       // Handle response to a request
@@ -2507,6 +2710,7 @@ function connectToFigma(port: number = 3055) {
   ws.on("close", () => {
     logger.info("Disconnected from Figma socket server");
     ws = null;
+    currentChannel = null; // Reset current channel on disconnection
 
     // Reject all pending requests
     for (const [id, request] of pendingRequests.entries()) {
@@ -2520,6 +2724,7 @@ function connectToFigma(port: number = 3055) {
     setTimeout(() => connectToFigma(port), 2000);
   });
 }
+
 // Simplified sendCommandToFigma function without channel requirements
 function sendCommandToFigma(
   command: FigmaCommand,
@@ -2534,10 +2739,21 @@ function sendCommandToFigma(
       return;
     }
 
+    // Check if we have a channel
+    if (!currentChannel) {
+      reject(
+        new Error(
+          "Not connected to any channel. Please wait for channel connection."
+        )
+      );
+      return;
+    }
+
     const id = uuidv4();
     const request = {
       id,
       type: "message",
+      channel: currentChannel, // Include the current channel
       message: {
         id,
         command,
@@ -2568,13 +2784,14 @@ function sendCommandToFigma(
     });
 
     // Send the request
-    logger.info(`Sending command to Figma: ${command}`);
+    logger.info(
+      `Sending command to Figma: ${command} in channel: ${currentChannel}`
+    );
     logger.debug(`Request details: ${JSON.stringify(request)}`);
     ws.send(JSON.stringify(request));
   });
 }
 
-// Add a connection status tool to replace join_channel
 server.tool(
   "check_connection_status",
   "Check the connection status with Figma",
@@ -2582,6 +2799,7 @@ server.tool(
   async () => {
     try {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connectToFigma();
         return {
           content: [
             {
@@ -2592,14 +2810,23 @@ server.tool(
         };
       }
 
-      // Test connection with a simple command
-      await sendCommandToFigma("get_document_info");
+      // If we're connected but don't have a channel
+      if (!currentChannel) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Connected to Figma socket server but not joined to any channel. Waiting for channel connection...",
+            },
+          ],
+        };
+      }
 
       return {
         content: [
           {
             type: "text",
-            text: "Connected to Figma socket server and ready to communicate.",
+            text: `Connected to Figma socket server and joined channel: ${currentChannel}`,
           },
         ],
       };
