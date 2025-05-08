@@ -5,10 +5,12 @@ import base64
 import asyncio
 import aiohttp
 import requests
+import io
 from pathlib import Path
 from dotenv import load_dotenv
 from config import load_config
 from datetime import datetime
+from PIL import Image
 
 load_dotenv()
 CONFIG = load_config()
@@ -19,11 +21,17 @@ MODELS = CONFIG["models"]
 VARIANTS = CONFIG["variants"]
 FIGMA_FILE_KEY = CONFIG["figma_file_key"]
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_BASE_URL = CONFIG["api_base_url"]
 FIGMA_API_TOKEN = os.getenv("FIGMA_API_TOKEN")
 HEADERS = {"X-Figma-Token": FIGMA_API_TOKEN}
+EXPORT_BASE_URL = "https://api.figma.com/v1"
 
-LOG_FILE = RESULTS_DIR / "experiment_log.txt"
+LOG_FILE = RESULTS_DIR / f"experiment_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+
+page = "Page 1"
+frame = None
+format = "png"
+scale = 1
 
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -43,6 +51,13 @@ async def create_root_frame(session):
     params = {"x": 0, "y": 0, "width": 320, "height": 720, "name": "Frame"}
     async with session.post(f"{API_BASE_URL}/tool/create_root_frame", params=params) as res:
         return await res.json()
+
+async def get_document_info():
+    response = requests.post(f"{API_BASE_URL}/tool/get_document_info")
+    try:
+        return json.loads(response.json()["message"])
+    except:
+        return {}
 
 async def generate_variant(session, variant, model_name, image_path, meta_json):
     if "image" in variant:
@@ -72,33 +87,101 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
     async with session.post(f"{API_BASE_URL}/{endpoint}", data=data) as res:
         return await res.json()
 
-def fetch_node_export(json_response, step_count, root_frame_id, result_dir: Path, result_name: str):
-    node_id = root_frame_id
-    for attempt in range(2):
-        node_url = f"https://api.figma.com/v1/files/{FIGMA_FILE_KEY}/nodes?ids={node_id}"
-        try:
-            res = requests.get(node_url, headers=HEADERS)
-            if res.status_code == 200:
-                node_data = res.json()
-                with open(result_dir / f"{result_name}.json", "w", encoding="utf-8") as f:
-                    json.dump(node_data, f, indent=2, ensure_ascii=False)
 
-                thumbnail_url = node_data.get("thumbnailUrl")
-                if thumbnail_url:
-                    img_res = requests.get(thumbnail_url)
-                    if img_res.status_code == 200:
-                        with open(result_dir / f"{result_name}.png", "wb") as f:
-                            f.write(img_res.content)
-                break
-            else:
-                if attempt == 0:
-                    node_id = increment_node_id(node_id)
-                else:
-                    return
+def get_node_infos(file_key: str, page_name: str, frame_name: str = None, result_dir: Path = None, result_name: str = None):
+    url = f"{EXPORT_BASE_URL}/files/{file_key}"
+    res = requests.get(url, headers=HEADERS)
+    if res.status_code == 200:
+        node_data = res.json()
+        with open(result_dir / f"{result_name}.json", "w", encoding="utf-8") as f:
+            json.dump(node_data, f, indent=2, ensure_ascii=False)
 
-        except Exception as e:
-            log(f"[ERROR] Node export failed for {result_name}: {e}")
+    res.raise_for_status()
+    document = res.json()["document"]
 
+    page = next((c for c in document["children"] if c["name"] == page_name), None)
+    if not page:
+        raise ValueError(f"Page '{page_name}' not found")
+
+    targets = []
+
+    def recurse(nodes):
+        for node in nodes:
+            if "absoluteBoundingBox" in node:
+                targets.append({
+                    "id": node["id"],
+                    "name": re.sub(r"[^\w\-_]", "_", node["name"]),
+                    "bbox": node["absoluteBoundingBox"]
+                })
+            if "children" in node:
+                recurse(node["children"])
+
+    if frame_name:
+        frame = next((f for f in page["children"] if f["name"] == frame_name), None)
+        if not frame:
+            raise ValueError(f"Frame '{frame_name}' not found")
+        recurse(frame["children"])
+    else:
+        recurse(page["children"])
+
+    return targets  # List of dicts: id, name, bbox
+
+
+def export_images(file_key: str, node_infos: list, format: str = "png", out_dir: str = "exported_assets", scale: int = 1):
+    os.makedirs(out_dir, exist_ok=True)
+    ids = ",".join([n["id"] for n in node_infos])
+    url = f"{EXPORT_BASE_URL}/images/{file_key}?ids={ids}&format={format}&scale={scale}"
+    res = requests.get(url, headers=HEADERS)
+    res.raise_for_status()
+    images = res.json()["images"]
+
+    results = []
+    for node in node_infos:
+        node_id = node["id"]
+        name = node["name"]
+        if node_id not in images:
+            continue
+        img_url = images[node_id]
+        img_data = requests.get(img_url)
+        if img_data.status_code == 200:
+            file_path = Path(out_dir) / f"{name}.{format}"
+            print(file_path)
+            with open(file_path, "wb") as f:
+                f.write(img_data.content)
+            results.append(str(file_path))
+    return results
+
+
+def render_combined_image(node_infos: list, img_urls: dict, out_path="combined_output.png", scale=1):
+    if not node_infos:
+        raise ValueError("No nodes provided for rendering.")
+
+    min_x = min(int(n["bbox"]["x"] * scale) for n in node_infos)
+    min_y = min(int(n["bbox"]["y"] * scale) for n in node_infos)
+    max_x = max(int((n["bbox"]["x"] + n["bbox"]["width"]) * scale) for n in node_infos)
+    max_y = max(int((n["bbox"]["y"] + n["bbox"]["height"]) * scale) for n in node_infos)
+
+    canvas_width = max_x - min_x
+    canvas_height = max_y - min_y
+    canvas = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 0))
+
+    for node in node_infos:
+        node_id = node["id"]
+        if node_id not in img_urls:
+            continue
+        img_data = requests.get(img_urls[node_id])
+        if img_data.status_code == 200:
+            img = Image.open(io.BytesIO(img_data.content)).convert("RGBA")
+            x = int((node["bbox"]["x"] * scale) - min_x)
+            y = int((node["bbox"]["y"] * scale) - min_y)
+            canvas.paste(img, (x, y), img)
+
+    dir_name = os.path.dirname(out_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    canvas.save(out_path)
+    
+def fetch_node_export(json_response, step_count, result_dir: Path, result_name: str):
     with open(result_dir / f"{result_name}_json_response.json", "w", encoding="utf-8") as f:
         json.dump(json_response, f, indent=2, ensure_ascii=False)
 
@@ -108,6 +191,11 @@ def fetch_node_export(json_response, step_count, root_frame_id, result_dir: Path
 async def run_experiment():
     async with aiohttp.ClientSession() as session:
         for model_name in MODELS:
+            log(f"[Figma File key]: {FIGMA_FILE_KEY}")
+            log(f"[MODELS]: {MODELS}")
+            log(f"[API_BASE_URL]: {API_BASE_URL}")
+            log(f"[VARIANTS]: {VARIANTS}")
+
             model_dir = RESULTS_DIR / model_name
             model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -124,8 +212,8 @@ async def run_experiment():
 
                 for variant in VARIANTS:
                     result_name = f"{base_id}-{model_name}-{variant}"
-                    json_path = model_dir / f"{result_name}.json"
-                    png_path = model_dir / f"{result_name}.png"
+                    json_path = model_dir / result_name / f"{result_name}.json"
+                    png_path = model_dir / result_name / f"{result_name}.png"
                     if json_path.exists() and png_path.exists():
                         log(f"[SKIP] {result_name}")
                         print(f"[SKIP] {result_name}")
@@ -137,21 +225,42 @@ async def run_experiment():
                     in_progress_path.write_text(json.dumps(in_progress, indent=2, ensure_ascii=False), encoding='utf-8')
 
                     try:
-                        frame_gen_response = await create_root_frame(session)
-                        root_frame_id = frame_gen_response.get("root_frame_id")
-                        if not root_frame_id:
-                            log(f"[ERROR] Root frame creation failed for {result_name}")
-                            print(f"[ERROR] Root frame creation failed for {result_name}")
-                            continue
+                        # Check canvas is empty BEFORE generating
+                        document = await get_document_info()
+                        if document.get("children"):
+                            delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
+                            delete_response = requests.post(delete_url)
+                            if delete_response.status_code == 200:
+                                log(f"[CLEANUP] Deleted all top-level nodes before starting {result_name}")
+                                print(f"[CLEANUP] Deleted all top-level nodes before starting {result_name}")
 
                         response = await generate_variant(session, variant, model_name, image_path, meta_json)
+                        log(f"response: {response}")
+                        
                         fetch_node_export(
                             response["json_response"],
                             response["step_count"],
-                            root_frame_id,
                             model_dir,
                             result_name
                         )
+                        node_infos = get_node_infos(FIGMA_FILE_KEY, page_name=page, frame_name=frame, result_dir=model_dir, result_name=result_name)
+                        saved = export_images(FIGMA_FILE_KEY, node_infos, format=format, scale=scale, out_dir=model_dir / result_name)
+
+                        print("[Exported Files]")
+                        print("\n".join(saved))
+
+                        ids = ",".join([n["id"] for n in node_infos])
+                        url = f"{EXPORT_BASE_URL}/images/{FIGMA_FILE_KEY}?ids={ids}&format={format}&scale={scale}"
+                        img_res = requests.get(url, headers=HEADERS)
+                        img_res.raise_for_status()
+                        img_urls = img_res.json()["images"]
+
+                        combined_path = f"{model_dir}/{result_name}/{result_name}.png"
+                        render_combined_image(node_infos, img_urls, out_path=combined_path, scale=scale)
+                        print("✅ Combined image saved to:", combined_path)
+
+                        with open(model_dir / result_name / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
+                            json.dump({"step_count": response["step_count"]}, f, indent=2)
 
                         delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
                         delete_response = requests.post(delete_url)
@@ -164,7 +273,6 @@ async def run_experiment():
                         else:
                             log(f"[CLEANUP-FAIL] Failed to delete nodes after {result_name}: {delete_response.status_code}")
                             print(f"[CLEANUP-FAIL] Failed to delete nodes after {result_name}: {delete_response.status_code}")
-
 
                     except Exception as e:
                         log(f"[ERROR] Failed {result_name}: {e}")
