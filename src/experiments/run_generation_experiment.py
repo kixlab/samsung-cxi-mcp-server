@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from config import load_config
 from datetime import datetime
 from PIL import Image
+import time
 
 load_dotenv()
 CONFIG = load_config()
@@ -38,6 +39,26 @@ def log(message):
     full_msg = f"[{timestamp}] {message}"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(full_msg + "\n")
+
+def ensure_canvas_empty():
+    for _ in range(3):
+        try:
+            res = requests.post(f"{API_BASE_URL}/tool/get_document_info")
+            results = res.json().get("status", "{}")
+            log(f"{results}")
+            if not results == "success":
+                del_res = requests.post(f"{API_BASE_URL}/tool/delete_all_top_level_nodes")
+                if del_res.status_code == 200:
+                    log("[CLEANUP] Deleted top-level nodes")
+                    return
+                else:
+                    log(f"[CLEANUP-RETRY] Failed with status {del_res.status_code}")
+            else:
+                return  # Already empty
+        except Exception as e:
+            log(f"[CLEANUP-ERROR] Exception during cleanup: {e}")
+        time.sleep(1)
+    raise RuntimeError("Canvas cleanup failed after retries")
 
 def increment_node_id(node_id):
     match = re.match(r"(\d+)-(\d+)", node_id)
@@ -234,18 +255,10 @@ async def run_experiment():
                     in_progress_path.write_text(json.dumps(in_progress, indent=2, ensure_ascii=False), encoding='utf-8')
 
                     try:
-                        # Check canvas is empty BEFORE generating
-                        document = await get_document_info()
-                        if document.get("children"):
-                            delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
-                            delete_response = requests.post(delete_url)
-                            if delete_response.status_code == 200:
-                                log(f"[CLEANUP] Deleted all top-level nodes before starting {result_name}")
-                                print(f"[CLEANUP] Deleted all top-level nodes before starting {result_name}")
-
+                        ensure_canvas_empty()
                         response = await generate_variant(session, variant, model_name, image_path, meta_json)
                         log(f"response: {response}")
-                        
+
                         fetch_node_export(
                             response["json_response"],
                             response["step_count"],
@@ -276,18 +289,6 @@ async def run_experiment():
                         with open(model_dir / result_name / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
                             json.dump({"step_count": response["step_count"]}, f, indent=2)
 
-                        delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
-                        delete_response = requests.post(delete_url)
-                        if delete_response.status_code == 200:
-                            log(f"[CLEANUP] Deleted all top-level nodes after {result_name}")
-                            print(f"[CLEANUP] Deleted all top-level nodes after {result_name}")
-                            if result_name in in_progress:
-                                del in_progress[result_name]
-                                in_progress_path.write_text(json.dumps(in_progress, indent=2, ensure_ascii=False), encoding='utf-8')
-                        else:
-                            log(f"[CLEANUP-FAIL] Failed to delete nodes after {result_name}: {delete_response.status_code}")
-                            print(f"[CLEANUP-FAIL] Failed to delete nodes after {result_name}: {delete_response.status_code}")
-
                     except Exception as e:
                         log(f"[ERROR] Failed {result_name}: {e}")
                         print(f"[ERROR] Failed {result_name}: {e}")
@@ -305,12 +306,17 @@ async def run_experiment():
                             except Exception as e_inner:
                                 log(f"[ERROR][SAVE-FAIL] Couldn't save partial response for {result_name}: {e_inner}")
 
-                        delete_url = f"{API_BASE_URL}/tool/delete_all_top_level_nodes"
-                        delete_response = requests.post(delete_url)
-                        if delete_response.status_code == 200:
-                            log(f"[CLEANUP] Deleted all top-level nodes after failed {result_name}")
-                        else:
-                            log(f"[CLEANUP-FAIL] Failed to delete nodes after failed {result_name}: {delete_response.status_code}")
+                    finally:
+                        try:
+                            ensure_canvas_empty()
+                            log(f"[CLEANUP] Deleted all top-level nodes after {result_name}")
+                            print(f"[CLEANUP] Deleted all top-level nodes after {result_name}")
+                        except Exception as e:
+                            log(f"[CLEANUP-FAIL] Failed to cleanup after {result_name}: {e}")
+
+                        if result_name in in_progress:
+                            del in_progress[result_name]
+                            in_progress_path.write_text(json.dumps(in_progress, indent=2, ensure_ascii=False), encoding='utf-8')
 
 if __name__ == "__main__":
     asyncio.run(run_experiment())
