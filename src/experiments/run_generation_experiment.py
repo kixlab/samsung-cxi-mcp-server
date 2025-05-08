@@ -107,11 +107,11 @@ def get_node_infos(file_key: str, page_name: str, frame_name: str = None, result
 
     def recurse(nodes):
         for node in nodes:
-            if "absoluteBoundingBox" in node:
+            if "absoluteRenderBounds" in node:
                 targets.append({
                     "id": node["id"],
                     "name": re.sub(r"[^\w\-_]", "_", node["name"]),
-                    "bbox": node["absoluteBoundingBox"]
+                    "bbox": node["absoluteRenderBounds"]
                 })
             if "children" in node:
                 recurse(node["children"])
