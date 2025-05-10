@@ -2,14 +2,21 @@ benchmark_dir: ../dataset/benchmarks/generation_gt
 results_dir: ../dataset/results/generation_gen
 
 models:
-  - gpt-4o
+  # - gpt-4o
   # - claude-3-5-sonnet
+  - gemini
 
 variants:
   - image_only
   # - text_level_1
   # - text_level_2
-  - image_text_level_1
-  - image_text_level_2
+  # - image_text_level_1
+  # - image_text_level_2
 
-figma_file_key: v31zMGy1gZPLaLJHyiliqm
+# channel 1
+figma_file_key: JtTP5OvsUBvSiS2g5BK95t
+api_base_url: http://localhost:8000
+
+# channel 2
+# figma_file_key: fKAsAWsx28xTdWlAogIwga
+# api_base_url: http://localhost:8001
