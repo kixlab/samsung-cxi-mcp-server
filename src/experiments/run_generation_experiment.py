@@ -12,18 +12,32 @@ from config import load_config
 from datetime import datetime
 from PIL import Image
 import time
+import argparse
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True, help="Model name (e.g. gemini, gpt-4o)")
+    parser.add_argument("--variants", type=str, required=True, help="Comma-separated variants (e.g. image_only,text_level_1)")
+    parser.add_argument("--channel", type=str, required=True, help="Channel name from config.yaml (e.g. channel_1)")
+    parser.add_argument("--config_path", type=str, default="config.yaml", help="Path to config.yaml (optional)")
+    return parser.parse_args()
+
+args = parse_args()
 load_dotenv()
-CONFIG = load_config()
+CONFIG = load_config(args.config_path)
+
+channel_cfg = CONFIG["channels"].get(args.channel)
+if channel_cfg is None:
+    raise ValueError(f"[ERROR] Channel '{args.channel}' not found in config.yaml")
 
 BENCHMARK_DIR = Path(CONFIG["benchmark_dir"])
 RESULTS_DIR = Path(CONFIG["results_dir"])
-MODELS = CONFIG["models"]
-VARIANTS = CONFIG["variants"]
-FIGMA_FILE_KEY = CONFIG["figma_file_key"]
-
-API_BASE_URL = CONFIG["api_base_url"]
+MODELS = [args.model]
+VARIANTS = args.variants.split(",")
+API_BASE_URL = channel_cfg["api_base_url"]
+FIGMA_FILE_KEY = channel_cfg["figma_file_key"]
 FIGMA_API_TOKEN = os.getenv("FIGMA_API_TOKEN")
+
 HEADERS = {"X-Figma-Token": FIGMA_API_TOKEN}
 EXPORT_BASE_URL = "https://api.figma.com/v1"
 
