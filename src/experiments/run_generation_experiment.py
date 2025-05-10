@@ -13,6 +13,7 @@ from datetime import datetime
 from PIL import Image
 import time
 import argparse
+import yaml
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -20,6 +21,8 @@ def parse_args():
     parser.add_argument("--variants", type=str, required=True, help="Comma-separated variants (e.g. image_only,text_level_1)")
     parser.add_argument("--channel", type=str, required=True, help="Channel name from config.yaml (e.g. channel_1)")
     parser.add_argument("--config_path", type=str, default="config.yaml", help="Path to config.yaml (optional)")
+    parser.add_argument("--batch_name", type=str, help="Optional: batch name to run (e.g., batch_1)")
+    parser.add_argument("--batches_config_path", type=str, help="Optional: path to batches.yaml")
     return parser.parse_args()
 
 args = parse_args()
@@ -47,6 +50,19 @@ page = "Page 1"
 frame = None
 format = "png"
 scale = 1
+
+allowed_ids = None
+if args.batch_name and args.batches_config_path:
+    try:
+        with open(args.batches_config_path, "r") as f:
+            batch_yaml = yaml.safe_load(f)
+        batch_file_path = batch_yaml["batches"].get(args.batch_name)
+        if batch_file_path is None:
+            raise ValueError(f"[ERROR] batch_name '{args.batch_name}' not found in {args.batches_config_path}")
+        with open(batch_file_path, "r") as f:
+            allowed_ids = set(line.strip() for line in f)
+    except Exception as e:
+        raise RuntimeError(f"[ERROR] Failed to load batch from YAML: {e}")
 
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -249,6 +265,10 @@ async def run_experiment():
 
             for meta_file in BENCHMARK_DIR.glob("*-meta.json"):
                 base_id = meta_file.stem.replace("-meta", "")
+                
+                if allowed_ids is not None and base_id not in allowed_ids:
+                    continue
+                
                 image_path = BENCHMARK_DIR / f"{base_id}.png"
                 with open(meta_file, "r", encoding="utf-8") as f:
                     meta_json = json.load(f)
