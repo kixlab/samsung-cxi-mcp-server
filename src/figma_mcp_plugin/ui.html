@@ -166,6 +166,16 @@
             </button>
           </div>
         </div>
+
+        <div class="section">
+          <label for="channel-select">Channel</label>
+          <div style="display: flex; gap: 8px">
+            <select id="channel-select" style="flex-grow: 1; padding: 6px; background-color: #2d2d2d; color: #e0e0e0; border: 1px solid #444; border-radius: 4px;" disabled>
+              <option value="">Fetching channels...</option>
+            </select>
+          </div>
+        </div>
+        
         
         <div id="connection-status" class="status disconnected">
           Not connected to server
@@ -210,8 +220,11 @@
         pendingRequests: new Map(),
         logs: [],
         maxLogs: 500,
+        channels: [],
+        currentChannel: null,
+        joinedChannel: false
       };
-    
+
       // UI Elements
       const portInput = document.getElementById("port");
       const connectButton = document.getElementById("btn-connect");
@@ -221,6 +234,7 @@
       const logPanelTab = document.getElementById("log-panel-tab");
       const btnClearLogs = document.getElementById("btn-clear-logs");
       const btnClearLogsTab = document.getElementById("btn-clear-logs-tab");
+      const channelSelect = document.getElementById("channel-select");
     
       // Tabs
       const tabs = document.querySelectorAll(".tab");
@@ -232,6 +246,12 @@
       const progressMessage = document.getElementById("progress-message");
       const progressStatus = document.getElementById("progress-status");
       const progressPercentage = document.getElementById("progress-percentage");
+
+      // Channel select event listener
+      channelSelect.addEventListener("change", function() {
+        state.currentChannel = this.value;
+        joinChannel();
+      });
     
       // Initialize UI
       function updateConnectionStatus(isConnected, message) {
@@ -252,29 +272,39 @@
             updateConnectionStatus(true, "Already connected to server");
             return;
           }
-    
+      
           state.serverPort = port;
           state.socket = new WebSocket(`ws://localhost:${port}`);
-    
+      
           state.socket.onopen = () => {
-            state.socket.send(
-              JSON.stringify({
-                type: "join",
-                id: generateId()
-              })
-            );
+            state.connected = true;
+            updateConnectionStatus(true, `Connected to server on port ${port}. Fetching channels...`);
+            
+            // Request available channels
+            requestAvailableChannels();
           };
-    
+      
           state.socket.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
               console.log("Received message:", data);
-    
+      
+              // Handle channel list response
+              if (data.type === "channels") {
+                handleChannelList(data.channels);
+                return;
+              }
+      
+              // Only process messages from the current channel if we've joined one
+              if (state.joinedChannel && data.channel && data.channel !== state.currentChannel) {
+                console.log(`Ignoring message from different channel: ${data.channel}`);
+                return;
+              }
+      
               if (data.type === "system") {
                 if (data.message && data.message.result) {
-                  state.connected = true;
                   updateConnectionStatus(true, `Connected to server on port ${port}`);
-    
+      
                   parent.postMessage(
                     {
                       pluginMessage: {
@@ -289,32 +319,156 @@
                 console.error("Error:", data.message);
                 updateConnectionStatus(false, `Error: ${data.message}`);
                 state.socket.close();
+              } else if (data.type === "join_result") {
+                if (data.success) {
+                  state.joinedChannel = true;
+                  updateConnectionStatus(true, `Connected on port ${port}, joined channel: ${state.currentChannel}`);
+                  
+                  addLogEntry({
+                    timestamp: new Date().toISOString(),
+                    direction: "system",
+                    type: "channel",
+                    data: `Successfully joined channel: ${state.currentChannel}`
+                  });
+                } else {
+                  addLogEntry({
+                    timestamp: new Date().toISOString(), 
+                    direction: "system",
+                    type: "error",
+                    data: `Failed to join channel: ${data.error || "Unknown error"}`
+                  });
+                }
+                return;
               }
-    
+      
               handleSocketMessage(data);
+              
+              // Add incoming message to log
+              addLogEntry({
+                timestamp: new Date().toISOString(),
+                direction: "incoming",
+                type: "websocket",
+                data: data
+              });
             } catch (error) {
               console.error("Error parsing message:", error);
             }
           };
-    
+      
           state.socket.onclose = () => {
             state.connected = false;
             state.socket = null;
+            state.joinedChannel = false;
+            state.currentChannel = null;
             updateConnectionStatus(false, "Disconnected from server");
+            updateChannelSelectUI(false);
           };
-    
+      
           state.socket.onerror = (error) => {
             console.error("WebSocket error:", error);
             updateConnectionStatus(false, "Connection error");
             state.connected = false;
             state.socket = null;
+            state.joinedChannel = false;
+            state.currentChannel = null;
+            updateChannelSelectUI(false);
           };
         } catch (error) {
           console.error("Connection error:", error);
           updateConnectionStatus(false, `Connection error: ${error.message || "Unknown error"}`);
         }
       }
-    
+
+      // Request available channels from the server
+      function requestAvailableChannels() {
+        if (!state.connected || !state.socket) {
+          console.error("Cannot request channels: socket not connected");
+          return;
+        }
+        
+        state.socket.send(
+          JSON.stringify({
+            type: "get_channels",
+            id: generateId()
+          })
+        );
+      }
+
+      // Handle received channel list
+      function handleChannelList(channels) {
+        if (!Array.isArray(channels) || channels.length === 0) {
+          addLogEntry({
+            timestamp: new Date().toISOString(),
+            direction: "system",
+            type: "warning",
+            data: "No channels available from server"
+          });
+          return;
+        }
+        
+        state.channels = channels;
+        
+        // Update channel dropdown
+        updateChannelSelectUI(true);
+        
+        // Automatically select the first channel
+        state.currentChannel = channels[0];
+        channelSelect.value = channels[0];
+        
+        // Automatically join the selected channel
+        joinChannel();
+      }
+
+      // Update channel select dropdown UI
+      function updateChannelSelectUI(enabled) {
+        channelSelect.disabled = !enabled;
+        
+        if (enabled && state.channels.length > 0) {
+          channelSelect.innerHTML = '';
+          state.channels.forEach(channel => {
+            const option = document.createElement('option');
+            option.value = channel;
+            option.textContent = channel;
+            if (channel === state.currentChannel) {
+              option.selected = true;
+            }
+            channelSelect.appendChild(option);
+          });
+        } else {
+          channelSelect.innerHTML = '<option value="">No channels available</option>';
+        }
+      }
+
+      // Join the selected channel
+      function joinChannel() {
+        if (!state.connected || !state.socket) {
+          console.error("Cannot join channel: socket not connected");
+          return;
+        }
+        
+        const channel = channelSelect.value;
+        if (!channel) {
+          console.error("No channel selected");
+          return;
+        }
+        
+        state.currentChannel = channel;
+        
+        state.socket.send(
+          JSON.stringify({
+            type: "join",
+            id: generateId(),
+            channel: state.currentChannel,
+            clientType: "figma_client"
+          })
+        );
+        
+        updateConnectionStatus(true, `Connected to server, joining channel: ${state.currentChannel}...`);
+      }
+
+
+
+
       // Disconnect from websocket server
       function disconnectFromServer() {
         if (state.socket) {
@@ -471,22 +625,29 @@
             reject(new Error("Not connected to server"));
             return;
           }
-    
+          
+          if (!state.joinedChannel) {
+            reject(new Error("Not joined to any channel"));
+            return;
+          }
+
           const id = generateId();
           state.pendingRequests.set(id, { resolve, reject });
-    
+
           state.socket.send(
             JSON.stringify({
               id,
               type: "message",
+              channel: state.currentChannel,
               message: {
                 id,
                 command,
                 params,
+                channel: state.currentChannel
               },
             })
           );
-    
+
           setTimeout(() => {
             if (state.pendingRequests.has(id)) {
               state.pendingRequests.delete(id);
