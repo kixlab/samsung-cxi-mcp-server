@@ -8,7 +8,7 @@ import requests
 import io
 from pathlib import Path
 from dotenv import load_dotenv
-from config import load_config
+from config import load_experiment_config
 from datetime import datetime
 from PIL import Image
 import time
@@ -17,24 +17,26 @@ import yaml
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, help="Model name (e.g. gemini, gpt-4o)")
+    parser.add_argument("--model", type=str, required=True, help="Worker Model name (e.g. gemini, gpt-4o)")
     parser.add_argument("--variants", type=str, required=True, help="Comma-separated variants (e.g. image_only,text_level_1)")
     parser.add_argument("--channel", type=str, required=True, help="Channel name from config.yaml (e.g. channel_1)")
-    parser.add_argument("--config_path", type=str, default="config.yaml", help="Path to config.yaml (optional)")
+    parser.add_argument("--config_name", type=str, default="base", help="Path to config.yaml (optional)")
     parser.add_argument("--batch_name", type=str, help="Optional: batch name to run (e.g., batch_1)")
     parser.add_argument("--batches_config_path", type=str, help="Optional: path to batches.yaml")
+    parser.add_argument("--multi_agent", action="store_true", help="Use multi-agent (supervisor-worker) mode")
     return parser.parse_args()
 
 args = parse_args()
 load_dotenv()
-CONFIG = load_config(args.config_path)
+CONFIG = load_experiment_config(args.config_name)
 
 channel_cfg = CONFIG["channels"].get(args.channel)
 if channel_cfg is None:
     raise ValueError(f"[ERROR] Channel '{args.channel}' not found in config.yaml")
 
 BENCHMARK_DIR = Path(CONFIG["benchmark_dir"])
-RESULTS_DIR = Path(CONFIG["results_dir"])
+RESULTS_DIR = Path(CONFIG["results_dir"]) / Path(f"{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}")
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS = [args.model]
 VARIANTS = args.variants.split(",")
 API_BASE_URL = channel_cfg["api_base_url"]
@@ -44,7 +46,7 @@ FIGMA_API_TOKEN = os.getenv("FIGMA_API_TOKEN")
 HEADERS = {"X-Figma-Token": FIGMA_API_TOKEN}
 EXPORT_BASE_URL = "https://api.figma.com/v1"
 
-LOG_FILE = RESULTS_DIR / f"experiment_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+LOG_FILE = RESULTS_DIR / f"experiment_log_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt"
 
 page = "Page 1"
 frame = None
@@ -56,10 +58,10 @@ if args.batch_name and args.batches_config_path:
     try:
         with open(args.batches_config_path, "r") as f:
             batch_yaml = yaml.safe_load(f)
-        batch_file_path = batch_yaml["batches"].get(args.batch_name)
-        if batch_file_path is None:
+        BATCH_FILE_PATH = batch_yaml["batches"].get(args.batch_name)
+        if BATCH_FILE_PATH is None:
             raise ValueError(f"[ERROR] batch_name '{args.batch_name}' not found in {args.batches_config_path}")
-        with open(batch_file_path, "r") as f:
+        with open(BATCH_FILE_PATH, "r") as f:
             allowed_ids = set(line.strip() for line in f)
     except Exception as e:
         raise RuntimeError(f"[ERROR] Failed to load batch from YAML: {e}")
@@ -111,24 +113,36 @@ async def get_document_info():
         return {}
 
 async def generate_variant(session, variant, model_name, image_path, meta_json):
-    if "image" in variant:
-        image_file = image_path.open("rb")
-    else:
-        image_file = None
-
+    # ---------- Common ----------
+    text_input = ""
     if "text" in variant:
         text_level = "description_one" if "level_1" in variant else "description_two"
-        text_input = meta_json[text_level]
-    else:
-        text_input = ""
+        text_input = meta_json.get(text_level, "")
 
+    image_file = image_path.open("rb") if "image" in variant else None
+
+    # ---------- Multi-Agent ----------
+    if args.multi_agent:
+        endpoint = "generate/multi"
+        data = aiohttp.FormData()
+        data.add_field("message", text_input or "Replicate this UI.")
+        if image_file:
+            data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+
+        async with session.post(f"{API_BASE_URL}/{endpoint}?worker_model={model_name}",
+                                data=data) as res:
+            return await res.json()
+
+    # ---------- Single-Agent ----------
     if variant == "image_only":
         endpoint = "generate/image"
         data = aiohttp.FormData()
-        data.add_field("image", image_path.open("rb"), filename=image_path.name, content_type="image/png")
-    elif variant == "text_level_1" or variant == "text_level_2":
+        data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+
+    elif variant.startswith("text_level"):
         endpoint = "generate/text"
         data = {"message": text_input}
+
     else:
         endpoint = "generate/text-image"
         data = aiohttp.FormData()
@@ -137,6 +151,7 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
 
     async with session.post(f"{API_BASE_URL}/{endpoint}", data=data) as res:
         return await res.json()
+
 
 
 def get_node_infos(file_key: str, page_name: str, frame_name: str = None, result_dir: Path = None, result_name: str = None):
@@ -195,47 +210,13 @@ def export_images(file_key: str, node_infos: list, format: str = "png", out_dir:
         img_url = images[node_id]
         img_data = requests.get(img_url)
         if img_data.status_code == 200:
-            file_path = Path(out_dir) / "assets" / f"{name}.{format}"
+            file_path = Path(out_dir) / "assets" / f"{node_id}.{format}"
             file_path.parent.mkdir(parents=True, exist_ok=True)
             print(file_path)
             with open(file_path, "wb") as f:
                 f.write(img_data.content)
             results.append(str(file_path))
     return results
-
-
-def render_combined_image(node_infos: list, img_urls: dict, out_path="combined_output.png", scale=1):
-    if not node_infos:
-        raise ValueError("No nodes provided for rendering.")
-
-    try:
-        min_x = min(int(n["bbox"]["x"] * scale) for n in node_infos)
-        min_y = min(int(n["bbox"]["y"] * scale) for n in node_infos)
-        max_x = max(int((n["bbox"]["x"] + n["bbox"]["width"]) * scale) for n in node_infos)
-        max_y = max(int((n["bbox"]["y"] + n["bbox"]["height"]) * scale) for n in node_infos)
-
-        canvas_width = max_x - min_x
-        canvas_height = max_y - min_y
-        canvas = Image.new("RGBA", (canvas_width, canvas_height), (255, 255, 255, 0))
-
-        for node in node_infos:
-            node_id = node["id"]
-            if node_id not in img_urls:
-                continue
-            img_data = requests.get(img_urls[node_id])
-            if img_data.status_code == 200:
-                img = Image.open(io.BytesIO(img_data.content)).convert("RGBA")
-                x = int((node["bbox"]["x"] * scale) - min_x)
-                y = int((node["bbox"]["y"] * scale) - min_y)
-                canvas.paste(img, (x, y), img)
-        dir_path = os.path.dirname(out_path)
-        if dir_path and not os.path.exists(dir_path):
-            os.makedirs(dir_path, exist_ok=True)
-        canvas.save(out_path)
-    except Exception as e:
-        print(f"[WARNING] Failed to process image for node {node_id}: {e}")
-
-
 
 def fetch_node_export(json_response, step_count, model_dir: Path, result_name: str):
     output_dir = model_dir / result_name
@@ -254,6 +235,7 @@ async def run_experiment():
             log(f"[MODELS]: {MODELS}")
             log(f"[API_BASE_URL]: {API_BASE_URL}")
             log(f"[VARIANTS]: {VARIANTS}")
+            print(f"[DEBUG] Loaded allowed_ids: {allowed_ids}")
 
             model_dir = RESULTS_DIR / model_name
             model_dir.mkdir(parents=True, exist_ok=True)
@@ -311,15 +293,6 @@ async def run_experiment():
                         img_res = requests.get(url, headers=HEADERS)
                         img_res.raise_for_status()
                         img_urls = img_res.json()["images"]
-
-                        combined_path = f"{model_dir}/{result_name}/{result_name}.png"
-                        try:
-                            render_combined_image(node_infos, img_urls, out_path=combined_path, scale=scale)
-                            print("✅ Combined image saved to:", combined_path)
-                        except Exception as render_err:
-                            log(f"[ERROR] canvas rendering failed for {result_name}: {render_err}")
-                            failures[result_name] = failures.get(result_name, 0) + 1
-                            continue
 
                         with open(model_dir / result_name / f"{result_name}_step_count.json", "w", encoding="utf-8") as f:
                             json.dump({"step_count": response["step_count"]}, f, indent=2)

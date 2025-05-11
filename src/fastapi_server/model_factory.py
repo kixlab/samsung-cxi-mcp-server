@@ -46,22 +46,12 @@ def get_model(model_name: str = None):
             model_kwargs={"temperature": 0.7, "max_tokens": 1024}
         )
 
-    # elif model_name.startswith("gemini"):
-        
-    #     vertexai_init(project="prj-samsung-cxi", location="us-central1")
-        
-    #     return ChatVertexAI(
-    #         model="gemini-2.5-pro-preview-05-06",
-    #         model_kwargs={"temperature": 0.7, "max_tokens": 1024}
-    #     )
-
     elif model_name.startswith("gemini"):
                 
         return ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
             model_kwargs={"temperature": 0.7, "max_tokens": 1024}
         )
-
 
     else:
         raise ValueError(f"Unsupported model: {model_name}")
