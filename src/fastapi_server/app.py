@@ -2,9 +2,28 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi_server.agent import startup, shutdown, run_agent, call_tool
+
+# ------------------ CLI args ------------------
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--agent_type", choices=["single", "multi"], default="single")
+args, _ = parser.parse_known_args()
+AGENT_TYPE = args.agent_type
+
+# ------------------ Agent setup ------------------
+if AGENT_TYPE == "single":
+    from fastapi_server.agent_single import startup, shutdown, run_single_agent as run_agent, call_tool
+if AGENT_TYPE == "multi":
+    from fastapi_server.agent_multi import startup, shutdown, run_multi_agent as run_agent, call_tool
+
 from fastapi_server.utils import jsonify_agent_response
-from fastapi_server.prompts import get_text_based_generation_prompt, get_image_based_generation_prompt, get_text_image_based_generation_prompt
+from fastapi_server.prompts import (
+    get_text_based_generation_prompt,
+    get_image_based_generation_prompt,
+    get_text_image_based_generation_prompt,
+)
+
+# ------------------ Setup ------------------
 import base64
 from pydantic import BaseModel
 import uvicorn
@@ -12,39 +31,29 @@ import os
 import re
 import json
 from typing import Optional, List
+from contextlib import asynccontextmanager
 
 class ChatRequest(BaseModel):
     message: str
 
-# Define lifespan context
-from contextlib import asynccontextmanager
 @asynccontextmanager
-async def lifespan_context():
-    await startup()
+async def lifespan_context(app: FastAPI):
+    await startup(agent_type=AGENT_TYPE)
     yield
     await shutdown()
-    
-# ========== Server State ==========
 
 current_channel: Optional[str] = None
 
-# ========== FastAPI Setup & Static Hosting =========
-    
-# Create directory structure if it doesn't exist
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")
-
 os.makedirs(static_dir, exist_ok=True)
 os.makedirs(templates_dir, exist_ok=True)
 
-app = FastAPI(lifespan=lambda app: lifespan_context())
-    
-# Mount static files directory
+app = FastAPI(lifespan=lifespan_context)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 templates = Jinja2Templates(directory=templates_dir)
 
-# ========== Routes =========
-
+# ------------------ Routes ------------------
 @app.get("/", response_class=HTMLResponse)
 async def get_homepage(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -132,6 +141,49 @@ async def generate_with_text_image(
 
         json_response = jsonify_agent_response(response)
         return {"response": str(response), "json_response": json_response, "step_count": step_count}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/generate/image/multi")
+async def generate_multi(
+    image: UploadFile = File(None),
+    message: str = Form("Replicate this UI."),
+    worker_model: str = Query(..., description="e.g., claude-3-5-sonnet")
+):
+    try:
+        from fastapi_server.agent_multi import startup as startup_multi, shutdown as shutdown_multi, run_multi_agent
+
+        agent_input = []
+
+        if message:
+            from fastapi_server.prompts import get_image_based_generation_prompt
+            instruction = get_image_based_generation_prompt()
+            agent_input.append({"type": "text", "text": instruction})
+
+        if image:
+            image_bytes = await image.read()
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            agent_input.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{image_b64}",
+                    "detail": "auto"
+                }
+            })
+        else:
+            raise ValueError("No image provided.")
+
+        await startup_multi(worker_model)
+        state = await run_multi_agent(agent_input, worker_model)
+        await shutdown_multi()
+
+        return {
+            "response": str(state),
+            "json_response": state,
+            "step_count": state.get("step_count", -1)
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -21,14 +21,11 @@ for i in range(num_batches):
     batch_ids = base_ids[i * batch_size : (i + 1) * batch_size]
     batch_txt_path = batch_output_dir / f"{batch_name}.txt"
 
-    # .txt 파일 저장
     with open(batch_txt_path, "w") as f:
         f.write("\n".join(batch_ids))
 
-    # YAML에 경로 기록 (상대경로 또는 절대경로 가능)
     batches_yaml["batches"][batch_name] = str(batch_txt_path)
 
-# batches.yaml 저장
 batches_yaml_path = batch_output_dir / "batches.yaml"
 with open(batches_yaml_path, "w") as f:
     yaml.dump(batches_yaml, f, sort_keys=False, allow_unicode=True)
