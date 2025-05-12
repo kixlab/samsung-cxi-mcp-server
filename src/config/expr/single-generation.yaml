@@ -1,6 +1,6 @@
 benchmark_dir: ../dataset/benchmarks/generation_gt
 results_dir: ../dataset/results/generation_gen
-batches_config_path: /home/seooyxx/kixlab/samsung-cxi-mcp-server/dataset/batches/generation/batches.yaml
+batches_config_path: ../dataset/batches/generation/batches.yaml
 
 variants:
   # - image_only
