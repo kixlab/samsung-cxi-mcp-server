@@ -30,6 +30,7 @@ scripts
 Make the batches with `python scripts/create_datataset_batch.py`.
 After that,
 
+## Generation Task
 with batch
 ```
 python -m experiments.run_generation_experiment \
@@ -46,4 +47,25 @@ python -m experiments.run_generation_experiment \
   --model=gemini \
   --variants=image_only \
   --channel=channel_1
+```
+
+for failure case 
+```
+python -m experiments.run_generation_experiment \
+  --model=gemini \
+  --variants=image_only \
+  --channel=channel_2 \
+  --batch_name=error_image_only \
+  --config_name=single-generation \
+  --batches_config_path=../dataset/batches/generation/batches.yaml
+```
+
+## Modification Task
+```
+python -m experiments.run_modification_experiment \
+  --config_name=single-modification \
+  --task=task-1 \
+  --model=gemini \
+  --variants=without_oracle \
+  --channel=channel_2 \
 ```

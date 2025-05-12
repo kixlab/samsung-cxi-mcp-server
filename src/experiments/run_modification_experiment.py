@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument("--channel", type=str, required=True, help="Channel name from config.yaml (e.g. channel_1)")
     parser.add_argument("--config_name", type=str, default="base", help="Path to config.yaml (optional)")
     parser.add_argument("--batch_name", type=str, help="Optional: batch name to run (e.g., batch_1)")
+
+    parser.add_argument("--task", type=str, help="task-1, task-2, task-3.")
     parser.add_argument("--batches_config_path", type=str, help="Optional: path to batches.yaml")
     parser.add_argument("--multi_agent", action="store_true", help="Use multi-agent (supervisor-worker) mode")
     return parser.parse_args()
@@ -34,13 +36,16 @@ channel_cfg = CONFIG["channels"].get(args.channel)
 if channel_cfg is None:
     raise ValueError(f"[ERROR] Channel '{args.channel}' not found in config.yaml")
 
-BENCHMARK_DIR = Path(CONFIG["benchmark_dir"])
-RESULTS_DIR = Path(CONFIG["results_dir"]) / Path(f"{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}")
-# RESULTS_DIR = Path(CONFIG["results_dir"])
-
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS = [args.model]
 VARIANTS = args.variants.split(",")
+
+BENCHMARK_DIR = Path(CONFIG["benchmark_dir"])
+# RESULTS_DIR = Path(CONFIG["results_dir"]) / Path(f"{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}")
+# RESULTS_DIR = Path(CONFIG["results_dir"])
+RESULTS_DIR = Path(CONFIG["results_dir"]) / Path(args.task) / Path(VARIANTS[0])
+
+
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 API_BASE_URL = channel_cfg["api_base_url"]
 FIGMA_FILE_KEY = channel_cfg["figma_file_key"]
 FIGMA_API_TOKEN = os.getenv("FIGMA_API_TOKEN")
@@ -114,42 +119,40 @@ async def get_document_info():
     except:
         return {}
 
+  # - without-oracle
+  # - perfect-hierachy
+  # - perfect-canvas
+
 async def generate_variant(session, variant, model_name, image_path, meta_json):
     # ---------- Common ----------
-    text_input = ""
-    if "text" in variant:
-        text_level = "description_one" if "level_1" in variant else "description_two"
-        text_input = meta_json.get(text_level, "")
+    text_input = meta_json.get("instruction", "")
+    
+    if variant == "without_oracle":
+        image_file = image_path.open("rb")
 
-    image_file = image_path.open("rb") if "image" in variant else None
-
-    # ---------- Multi-Agent ----------
-    if args.multi_agent:
-        endpoint = "generate/multi"
-        data = aiohttp.FormData()
-        data.add_field("message", text_input or "Replicate this UI.")
-        if image_file:
-            data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
-
-        async with session.post(f"{API_BASE_URL}/{endpoint}?worker_model={model_name}",
-                                data=data) as res:
-            return await res.json()
-
-    # ---------- Single-Agent ----------
-    if variant == "image_only":
-        endpoint = "generate/image"
-        data = aiohttp.FormData()
-        data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
-
-    elif variant.startswith("text_level"):
-        endpoint = "generate/text"
+    if variant == "perfect_hierachy":
+        endpoint = "modify/with-oracle/perfect-hierachy"
         data = {"message": text_input}
 
-    else:
-        endpoint = "generate/text-image"
+    # ---------- Multi-Agent ----------
+    # TODO
+
+    # ---------- Single-Agent ----------
+    if variant == "without_oracle":
+        endpoint = "modify/without-oracle"
         data = aiohttp.FormData()
         data.add_field("message", text_input)
         data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+
+    if variant == "perfect_hierachy":
+        endpoint = "modify/with-oracle/perfect-hierachy"
+        data = aiohttp.FormData()
+        data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+        # TODO: add json file
+
+    if variant == "perfect_canvas":
+        endpoint = "modify/with-oracle/perfect-canvas"
+        data = {"message": text_input}
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -195,7 +198,7 @@ def get_node_infos(file_key: str, page_name: str, frame_name: str = None, result
             if "absoluteRenderBounds" in node:
                 targets.append({
                     "id": node["id"],
-                    "name": re.sub(r"[^\w\-_]", "_", node["name"]),
+                    "name": re.sub(r"[^\w\-_]", "-", node["name"]),
                     "bbox": node["absoluteRenderBounds"]
                 })
             if "children" in node:
@@ -231,7 +234,6 @@ def export_images(file_key: str, node_infos: list, format: str = "png", out_dir:
         if img_data.status_code == 200:
             file_path = Path(out_dir) / "assets" / f"{node_id}.{format}"
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            print(file_path)
             with open(file_path, "wb") as f:
                 f.write(img_data.content)
             results.append(str(file_path))
@@ -264,7 +266,7 @@ async def run_experiment():
             in_progress = json.loads(in_progress_path.read_text(encoding='utf-8')) if in_progress_path.exists() else {}
             failures = json.loads(failures_path.read_text(encoding='utf-8')) if failures_path.exists() else {}
 
-            for meta_file in BENCHMARK_DIR.glob("*-meta.json"):
+            for meta_file in BENCHMARK_DIR.glob("*-base-meta.json"):
                 base_id = meta_file.stem.replace("-meta", "")
                 
                 if allowed_ids is not None and base_id not in allowed_ids:

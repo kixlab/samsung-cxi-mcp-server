@@ -21,6 +21,9 @@ from fastapi_server.prompts import (
     get_text_based_generation_prompt,
     get_image_based_generation_prompt,
     get_text_image_based_generation_prompt,
+    get_modification_without_oracle_prompt,
+    get_modification_with_oracle_hierarchy_prompt,
+    get_modification_with_oracle_perfect_canvas_prompt,
 )
 
 # ------------------ Setup ------------------
@@ -122,6 +125,130 @@ async def generate_with_text_image(
             
         if message:
             instruction = get_text_image_based_generation_prompt(message)
+            agent_input.append({"type": "text", "text": instruction})
+        else:
+            raise ValueError("No instruction provided.")
+            
+        if base64_image:
+            agent_input.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_image}",
+                    "detail": "auto"
+                }
+            })
+
+        response = await run_agent(agent_input)
+        messages = response.get("messages", [])
+        step_count = response.get("step_count", len(messages) - 1)
+
+        json_response = jsonify_agent_response(response)
+        return {"response": str(response), "json_response": json_response, "step_count": step_count}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/modify/without-oracle")
+async def modify_without_oracle(
+    image: UploadFile = File(None), 
+    message: str = Form(...),
+):
+    try:
+        agent_input = []
+        
+        base64_image = None
+        if image:
+            image_bytes = await image.read()
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        else:
+            raise ValueError("No image provided.")
+            
+        if message:
+            instruction = get_modification_without_oracle_prompt(message)
+            agent_input.append({"type": "text", "text": instruction})
+        else:
+            raise ValueError("No instruction provided.")
+            
+        if base64_image:
+            agent_input.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_image}",
+                    "detail": "auto"
+                }
+            })
+
+        response = await run_agent(agent_input)
+        messages = response.get("messages", [])
+        step_count = response.get("step_count", len(messages) - 1)
+
+        json_response = jsonify_agent_response(response)
+        return {"response": str(response), "json_response": json_response, "step_count": step_count}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/modify/with-oracle/perfect-hierachy")
+async def modify_with_oracle_perfect_hierarchy(
+    image: UploadFile = File(None), 
+    message: str = Form(...),
+):
+    try:
+        agent_input = []
+        
+        base64_image = None
+        if image:
+            image_bytes = await image.read()
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        else:
+            raise ValueError("No image provided.")
+            
+        if message:
+            instruction = get_modification_with_oracle_hierarchy_prompt(message)
+            agent_input.append({"type": "text", "text": instruction})
+        else:
+            raise ValueError("No instruction provided.")
+            
+        if base64_image:
+            agent_input.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_image}",
+                    "detail": "auto"
+                }
+            })
+
+        response = await run_agent(agent_input)
+        messages = response.get("messages", [])
+        step_count = response.get("step_count", len(messages) - 1)
+
+        json_response = jsonify_agent_response(response)
+        return {"response": str(response), "json_response": json_response, "step_count": step_count}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/modify/with-oracle/perfect-canvas")
+async def modify_with_oracle_perfect_canvas(
+    image: UploadFile = File(None), 
+    message: str = Form(...),
+):
+    try:
+        agent_input = []
+        
+        base64_image = None
+        if image:
+            image_bytes = await image.read()
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        else:
+            raise ValueError("No image provided.")
+            
+        if message:
+            instruction = get_modification_with_oracle_perfect_canvas_prompt(message)
             agent_input.append({"type": "text", "text": instruction})
         else:
             raise ValueError("No instruction provided.")
