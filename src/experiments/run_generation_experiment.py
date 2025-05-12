@@ -24,9 +24,36 @@ def parse_args():
     parser.add_argument("--batch_name", type=str, help="Optional: batch name to run (e.g., batch_1)")
     parser.add_argument("--batches_config_path", type=str, help="Optional: path to batches.yaml")
     parser.add_argument("--multi_agent", action="store_true", help="Use multi-agent (supervisor-worker) mode")
+    parser.add_argument("--guidance", type=str, help="Guidance variants.")
     return parser.parse_args()
 
+def set_langsmith_metadata(config_name, model_name, channel, machine=None, input_condition=None, guidance=None):
+    project = f"{config_name}-{model_name}"
+    tags = []
+
+    if input_condition:
+        tags.append(f"input_condition={input_condition}")
+    if guidance:
+        tags.append(f"guidance={guidance}")
+    if channel:
+        tags.append(f"channel={channel}")
+    if machine:
+        tags.append(f"machine={machine}")
+
+    os.environ["LANGCHAIN_PROJECT"] = project
+    os.environ["LANGSMITH_EXPERIMENT_TAGS"] = ",".join(tags)
+    
 args = parse_args()
+
+set_langsmith_metadata(
+    config_name=args.config_name,
+    model_name=args.model_name,
+    channel=args.channel,
+    machine=os.getenv("MACHINE_ID", "0"),
+    input_condition=args.variants,
+    guidance=os.getenv("GUIDANCE", "None")
+)
+
 load_dotenv()
 CONFIG = load_experiment_config(args.config_name)
 
@@ -114,7 +141,7 @@ async def get_document_info():
     except:
         return {}
 
-async def generate_variant(session, variant, model_name, image_path, meta_json):
+async def generate_variant(session, variant, model_name, image_path, meta_json, result_name):
     # ---------- Common ----------
     text_input = ""
     if "text" in variant:
@@ -128,6 +155,7 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
         endpoint = "generate/multi"
         data = aiohttp.FormData()
         data.add_field("message", text_input or "Replicate this UI.")
+        data.add_field("metadata", result_name)
         if image_file:
             data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
 
@@ -140,16 +168,19 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
         endpoint = "generate/image"
         data = aiohttp.FormData()
         data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+        data.add_field("metadata", result_name)
 
     elif variant.startswith("text_level"):
         endpoint = "generate/text"
         data = {"message": text_input}
+        data.add_field("metadata", result_name)
 
     else:
         endpoint = "generate/text-image"
         data = aiohttp.FormData()
         data.add_field("message", text_input)
         data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+        data.add_field("metadata", result_name)
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -292,7 +323,7 @@ async def run_experiment():
 
                     try:
                         ensure_canvas_empty()
-                        response = await generate_variant(session, variant, model_name, image_path, meta_json)
+                        response = await generate_variant(session, variant, model_name, image_path, meta_json, result_name)
                         log(f"response: {response}")
 
                         fetch_node_export(

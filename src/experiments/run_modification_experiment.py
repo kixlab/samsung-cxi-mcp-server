@@ -26,9 +26,36 @@ def parse_args():
     parser.add_argument("--task", type=str, help="task-1, task-2, task-3.")
     parser.add_argument("--batches_config_path", type=str, help="Optional: path to batches.yaml")
     parser.add_argument("--multi_agent", action="store_true", help="Use multi-agent (supervisor-worker) mode")
+    parser.add_argument("--guidance", type=str, help="Guidance variants.")
     return parser.parse_args()
 
+def set_langsmith_metadata(config_name, model_name, channel, machine=None, input_condition=None, guidance=None):
+    project = f"{config_name}-{model_name}"
+    tags = []
+
+    if input_condition:
+        tags.append(f"input_condition={input_condition}")
+    if guidance:
+        tags.append(f"guidance={guidance}")
+    if channel:
+        tags.append(f"channel={channel}")
+    if machine:
+        tags.append(f"machine={machine}")
+
+    os.environ["LANGCHAIN_PROJECT"] = project
+    os.environ["LANGSMITH_EXPERIMENT_TAGS"] = ",".join(tags)
+    
 args = parse_args()
+
+set_langsmith_metadata(
+    config_name=args.config_name,
+    model_name=args.model_name,
+    channel=args.channel,
+    machine=os.getenv("MACHINE_ID", "0"),
+    input_condition=args.variants,
+    guidance=os.getenv("GUIDANCE", "None")
+)
+
 load_dotenv()
 CONFIG = load_experiment_config(args.config_name)
 
@@ -123,7 +150,7 @@ async def get_document_info():
   # - perfect-hierachy
   # - perfect-canvas
 
-async def generate_variant(session, variant, model_name, image_path, meta_json):
+async def generate_variant(session, variant, model_name, image_path, meta_json, result_name):
     # ---------- Common ----------
     text_input = meta_json.get("instruction", "")
     
@@ -133,6 +160,7 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
     if variant == "perfect_hierachy":
         endpoint = "modify/with-oracle/perfect-hierachy"
         data = {"message": text_input}
+        data.add_field("metadata", result_name)
 
     # ---------- Multi-Agent ----------
     # TODO
@@ -143,16 +171,19 @@ async def generate_variant(session, variant, model_name, image_path, meta_json):
         data = aiohttp.FormData()
         data.add_field("message", text_input)
         data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
+        data.add_field("metadata", result_name)
 
     if variant == "perfect_hierachy":
         endpoint = "modify/with-oracle/perfect-hierachy"
         data = aiohttp.FormData()
         data.add_field("image", image_file, filename=image_path.name, content_type="image/png")
-        # TODO: add json file
+        data.add_field("metadata", result_name)
 
     if variant == "perfect_canvas":
         endpoint = "modify/with-oracle/perfect-canvas"
         data = {"message": text_input}
+        data.add_field("metadata", result_name)
+        # TODO: implementation oracle test
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -294,7 +325,7 @@ async def run_experiment():
 
                     try:
                         ensure_canvas_empty()
-                        response = await generate_variant(session, variant, model_name, image_path, meta_json)
+                        response = await generate_variant(session, variant, model_name, image_path, meta_json, result_name)
                         log(f"response: {response}")
 
                         fetch_node_export(

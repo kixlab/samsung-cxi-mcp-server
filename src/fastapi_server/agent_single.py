@@ -23,7 +23,18 @@ agent = None
 session = None
 stdio_context = None
 tool_dict = {}
-tracer = LangChainTracer()
+
+def make_tracer():
+    import os
+    from langsmith.client import Client
+
+    tags_str = os.getenv("LANGSMITH_EXPERIMENT_TAGS", "")
+    tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+    project = os.getenv("LANGCHAIN_PROJECT", "canvasbench-default")
+
+    return LangChainTracer(project_name=project, tags=tags)
+
+tracer = make_tracer()
 
 CONFIG = None
 
@@ -64,14 +75,18 @@ async def shutdown():
     if stdio_context:
         await stdio_context.__aexit__(None, None, None)
 
-async def run_single_agent(user_input: list):
+async def run_single_agent(user_input: list, metadata: dict = None):
     global agent
     human_message = HumanMessage(content=user_input)
+    tags = [f"{k}={v}" for k, v in (metadata or {}).items()]
+
     return await agent.ainvoke(
         {"messages": [human_message]},
         config={
             "recursion_limit": 100,
             "callbacks": [tracer],
+            "tags": tags,
+            "metadata": metadata or {}
         }
     )
 

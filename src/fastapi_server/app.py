@@ -62,13 +62,21 @@ async def get_homepage(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
  
 @app.post("/generate/text")
-async def generate_with_text(req: ChatRequest):
+async def generate_with_text(
+    req: ChatRequest,
+    metadata: str = Form(None)
+):
     try:        
         if req.message:
             instruction = get_text_based_generation_prompt(req.message)
             agent_input = [{"type": "text", "text": instruction}]
             
-            response = await run_agent(agent_input)
+            response = await run_agent(
+                agent_input,
+                metadata={
+                    "input_id": metadata or "unknown"
+                }
+            )
             messages = response.get("messages", [])
             step_count = response.get("step_count", len(messages) - 1)
             json_response = jsonify_agent_response(response)
@@ -79,7 +87,10 @@ async def generate_with_text(req: ChatRequest):
         return {"response": f"Error: {str(e)}"}
     
 @app.post("/generate/image")
-async def generate_with_image(image: UploadFile = File(None)):
+async def generate_with_image(
+    image: UploadFile = File(None), 
+    metadata: str = Form(None)
+):
     try:
         agent_input = []
         
@@ -99,7 +110,12 @@ async def generate_with_image(image: UploadFile = File(None)):
                     "detail": "auto"
                 }
             })
-        response = await run_agent(agent_input)
+        response = await run_agent(
+            agent_input,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         messages = response.get("messages", [])
         step_count = response.get("step_count", len(messages) - 1)
 
@@ -112,6 +128,7 @@ async def generate_with_image(image: UploadFile = File(None)):
 async def generate_with_text_image(
     image: UploadFile = File(None), 
     message: str = Form(...),
+    metadata: str = Form(None)
 ):
     try:
         agent_input = []
@@ -138,7 +155,12 @@ async def generate_with_text_image(
                 }
             })
 
-        response = await run_agent(agent_input)
+        response = await run_agent(
+            agent_input,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         messages = response.get("messages", [])
         step_count = response.get("step_count", len(messages) - 1)
 
@@ -153,6 +175,7 @@ async def generate_with_text_image(
 async def modify_without_oracle(
     image: UploadFile = File(None), 
     message: str = Form(...),
+    metadata: str = Form(None)
 ):
     try:
         agent_input = []
@@ -179,7 +202,12 @@ async def modify_without_oracle(
                 }
             })
 
-        response = await run_agent(agent_input)
+        response = await run_agent(
+            agent_input,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         messages = response.get("messages", [])
         step_count = response.get("step_count", len(messages) - 1)
 
@@ -194,6 +222,7 @@ async def modify_without_oracle(
 async def modify_with_oracle_perfect_hierarchy(
     image: UploadFile = File(None), 
     message: str = Form(...),
+    metadata: str = Form(None)
 ):
     try:
         agent_input = []
@@ -220,7 +249,12 @@ async def modify_with_oracle_perfect_hierarchy(
                 }
             })
 
-        response = await run_agent(agent_input)
+        response = await run_agent(
+            agent_input,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         messages = response.get("messages", [])
         step_count = response.get("step_count", len(messages) - 1)
 
@@ -236,6 +270,7 @@ async def modify_with_oracle_perfect_hierarchy(
 async def modify_with_oracle_perfect_canvas(
     image: UploadFile = File(None), 
     message: str = Form(...),
+    metadata: str = Form(None)
 ):
     try:
         agent_input = []
@@ -262,7 +297,12 @@ async def modify_with_oracle_perfect_canvas(
                 }
             })
 
-        response = await run_agent(agent_input)
+        response = await run_agent(
+            agent_input,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         messages = response.get("messages", [])
         step_count = response.get("step_count", len(messages) - 1)
 
@@ -277,7 +317,8 @@ async def modify_with_oracle_perfect_canvas(
 async def generate_multi(
     image: UploadFile = File(None),
     message: str = Form("Replicate this UI."),
-    worker_model: str = Query(..., description="e.g., claude-3-5-sonnet")
+    worker_model: str = Query(..., description="e.g., claude-3-5-sonnet"),
+    metadata: str = Form(None)
 ):
     try:
         from fastapi_server.agent_multi import startup as startup_multi, shutdown as shutdown_multi, run_multi_agent
@@ -303,7 +344,13 @@ async def generate_multi(
             raise ValueError("No image provided.")
 
         await startup_multi(worker_model)
-        state = await run_multi_agent(agent_input, worker_model)
+        state = await run_agent(
+            agent_input,
+            worker_model,
+            metadata={
+                "input_id": metadata or "unknown"
+            }
+        )
         await shutdown_multi()
 
         return {
