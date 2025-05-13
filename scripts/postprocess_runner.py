@@ -5,16 +5,22 @@ from PIL import Image, ImageDraw
 from tqdm import tqdm
 
 # === CONFIG ===
-TASK_ID = "task-3"
-MODEL_DIR = "gpt-4o"
-POSTPROCESS_DIR = Path(f"/home/seooyxx/kixlab/samsung-cxi-mcp-server/dataset/postprocess/modification_gen/without_oracle/{TASK_ID}/without_oracle/{MODEL_DIR}").expanduser()
-RETRY_LIST = []
+# TASK_IDS = ["task-1", "task-3"]
+# MODEL_DIRS = ["gpt-4o", "gpt-4.1", "claude-3.5-sonnet", "gemini"]
+
+# TASK_IDS = ["task-1", "task-3"]
+# MODEL_DIRS = ["gpt-4.1", "claude-3.5-sonnet", "gemini"]
+
+TASK_IDS = ["task-3"]
+MODEL_DIRS = ["gpt-4o"]
+
 
 # === TRACKING ===
 RETRY_LIST = []
 NODE_ONLY_LIST = []
 MISSING_ALL_LIST = []
 RENDERED_OUTPUTS = []
+THUMBNAIL_EXIST_LIST = []
 
 # === UTILS ===
 def get_step_count(path: Path) -> int:
@@ -81,11 +87,17 @@ def render_canvas_with_assets(node_json_path: Path, asset_dir: Path, output_img_
 
 
 # === MAIN PROCESSING ===
-def process_postprocess_dir():
+def process_postprocess_dir(task_id, model_dir):
+    POSTPROCESS_DIR = Path(f"/home/seooyxx/kixlab/samsung-cxi-mcp-server/dataset/postprocess/modification_gen/without_oracle/{task_id}/without_oracle/{model_dir}").expanduser()
+    RETRY_LIST = []
+    NODE_ONLY_LIST = []
+    MISSING_ALL_LIST = []
+    RENDERED_OUTPUTS = []
+
     expr_dirs = [d for d in POSTPROCESS_DIR.iterdir() if d.is_dir()]
     total = len(expr_dirs)
 
-    for expr_dir in tqdm(expr_dirs, desc="Processing Experiments"):
+    for expr_dir in tqdm(expr_dirs, desc=f"Processing Experiments [{task_id}/{model_dir}]"):
         expr_name = expr_dir.name
         step_path = expr_dir / f"{expr_name}-step-count.json"
         step_count = get_step_count(step_path)
@@ -112,6 +124,7 @@ def process_postprocess_dir():
                     response = requests.get(url)
                     with open(output_img_path, "wb") as out:
                         out.write(response.content)
+                    THUMBNAIL_EXIST_LIST.append(expr_name)
                 except Exception as e:
                     print(f"[ERROR] Thumbnail download failed for {expr_name}: {e}")
             else:
@@ -126,15 +139,16 @@ def process_postprocess_dir():
             else:
                 print(f"[MISSING] No response.json for {expr_name}")
 
-    print("\n=== SUMMARY ===")
+    print(f"\n=== SUMMARY for {task_id}/{model_dir} ===")
     print(f"Total experiments: {total}")
     print(f"- StepCount == -1: {len(RETRY_LIST)}")
-    print(f"- Node JSON only (no assets): {len(NODE_ONLY_LIST)}")
+    # print(f"- Node JSON only (no assets): {len(NODE_ONLY_LIST)}")
     print(f"- Missing both node json & assets: {len(MISSING_ALL_LIST)}")
+    print(f"- Thumbnail export list: {len(THUMBNAIL_EXIST_LIST)}")
     print(f"- Rendered: {len(RENDERED_OUTPUTS)}")
-    print(f"- Sum: {len(RETRY_LIST) + len(NODE_ONLY_LIST) + len(MISSING_ALL_LIST) + len(RENDERED_OUTPUTS)}")
+    print(f"- Sum: {len(RETRY_LIST) + len(THUMBNAIL_EXIST_LIST) + len(MISSING_ALL_LIST) + len(RENDERED_OUTPUTS)}")
 
-    assert total == (len(RETRY_LIST) + len(NODE_ONLY_LIST) + len(MISSING_ALL_LIST) + len(RENDERED_OUTPUTS)), "Mismatch in total count!"
+    assert total == (len(RETRY_LIST) + len(THUMBNAIL_EXIST_LIST) + len(MISSING_ALL_LIST) + len(RENDERED_OUTPUTS)), "Mismatch in total count!"
 
     with open(POSTPROCESS_DIR / "retry_step_minus_1.txt", "w") as f:
         for name in RETRY_LIST:
@@ -148,4 +162,6 @@ def process_postprocess_dir():
 
 # === ENTRY POINT ===
 if __name__ == "__main__":
-    process_postprocess_dir()
+    for task_id in TASK_IDS:
+        for model_dir in MODEL_DIRS:
+            process_postprocess_dir(task_id, model_dir)
