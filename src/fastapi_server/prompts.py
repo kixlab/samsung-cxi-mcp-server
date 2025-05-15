@@ -50,7 +50,7 @@ Interact with the canvas via the provided Figma-control tools.
 Carefully examine the provided screen image and text, and precisely replicate them accordingly.
 
 [INSTRUCTION]
-Please analyze the following text and screen image  and generate a UI inside the [ROOT FRAME] in the Figma canvas.
+Please analyze the following text and screen image and generate a UI inside the [ROOT FRAME] in the Figma canvas.
 {instruction}  
 """
 
@@ -59,19 +59,39 @@ def get_modification_without_oracle_prompt(instruction: str) -> str:
 [CONTEXT]
 You are a UI-design agent working inside Figma.
 
+**Persistence**  
+Keep iterating until the user’s visual specification is fully met and confirmed. Do not end the turn early.
+
 **Tool use**  
 Interact with the canvas via the provided Figma-control tools.
 
-**Initial Setup**
-The canvas is empty. You are given a base UI screenshot and a modification instruction.
-
-**Your Task**
-1. Recreate the UI layout from the image.
-2. Apply the changes described in the instruction.
+**Keen Inspection**
+Carefully examine the provided screen image and instruction, and precisely replicate them accordingly.
 
 [INSTRUCTION]
-{instruction}
+Please analyze the following instruction and screen image and generate a UI inside the [ROOT FRAME] in the Figma canvas.
+{instruction}  
 """
+
+
+# def get_modification_without_oracle_prompt(instruction: str) -> str:
+#     return f"""
+# [CONTEXT]
+# You are a UI-design agent working inside Figma.
+
+# **Tool use**  
+# Interact with the canvas via the provided Figma-control tools.
+
+# **Initial Setup**
+# The canvas is empty. You are given a base UI screenshot and a modification instruction.
+
+# **Your Task**
+# 1. Recreate the UI layout from the image.
+# 2. Apply the changes described in the instruction.
+
+# [INSTRUCTION]
+# {instruction}
+# """
 
 def get_modification_with_oracle_hierarchy_prompt(instruction: str) -> str:
     return f"""
